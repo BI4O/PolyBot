@@ -1,3 +1,5 @@
+"""Test agent using ChatOpenAI with DeepSeek."""
+
 from deepagents import create_deep_agent
 
 from src.conf.agent_models import DEEPSEEK_V4_FLASH
@@ -12,7 +14,7 @@ agent = create_deep_agent(
 
 if __name__ == "__main__":
     state = agent.invoke(
-        {"messages": [{"role": "user", "content": "hello, what model are u?"}]}
+        {"messages": [{"role": "user", "content": "say hi"}]}
     )
     for m in state["messages"]:
         m.pretty_print()

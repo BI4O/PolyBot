@@ -1,6 +1,9 @@
 # srcret
 .env
 
+# langgraph
+.langgraph_api/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
