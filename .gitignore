@@ -1,3 +1,6 @@
+# srcret
+.env
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -8,3 +11,12 @@ wheels/
 
 # Virtual environments
 .venv
+
+# ai coding
+.claude/
+.agent/
+CLAUDE.md
+AGENT.md
+
+# zed
+.zed/
