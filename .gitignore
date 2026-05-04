@@ -1,9 +1,6 @@
 # srcret
 .env
 
-# langgraph
-.langgraph_api/
-
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -15,11 +12,10 @@ wheels/
 # Virtual environments
 .venv
 
-# ai coding
-.claude/
-.agent/
-CLAUDE.md
-AGENT.md
+# All dot files (except those explicitly allowed)
+.*
+!.gitignore
+!.python-version
 
-# zed
-.zed/
+# test
+.pytest_cache/
