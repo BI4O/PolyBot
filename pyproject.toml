@@ -11,6 +11,9 @@ dependencies = [
     "langchain-openai>=1.2.1",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
