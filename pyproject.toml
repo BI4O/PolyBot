@@ -9,6 +9,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "langchain-deepseek>=1.0.1",
     "langchain-openai>=1.2.1",
+    "rich>=15.0.0",
 ]
 
 [tool.pytest.ini_options]
