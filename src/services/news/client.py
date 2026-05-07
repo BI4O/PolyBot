@@ -58,8 +58,8 @@ def _parse_rss_items(root: ElementTree.Element) -> list[dict[str, Any]]:
         pub_date = item.findtext("pubDate")
         items.append({
             "title": title.strip() if title else "",
-            "link": (link or "").strip(),
-            "summary": (desc or "").strip(),
+            "link": link.strip() if link else "",
+            "summary": desc.strip() if desc else "",
             "published": _parse_date(pub_date),
             "guid": item.findtext("guid") or link or "",
         })
@@ -82,7 +82,7 @@ def _parse_atom_items(root: ElementTree.Element) -> list[dict[str, Any]]:
         published = entry.findtext("atom:published", updated, ns)
         items.append({
             "title": title.strip() if title else "",
-            "link": link.strip(),
+            "link": link.strip() if link else "",
             "summary": summary.strip() if summary else "",
             "published": _parse_date(published),
             "guid": entry.findtext("atom:id", "", ns) or link,

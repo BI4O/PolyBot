@@ -26,7 +26,7 @@ async def extract_keywords(question: str) -> list[str]:
         msg = await DEEPSEEK_V4_FLASH.ainvoke(
             [HumanMessage(content=_EXTRACT_PROMPT.format(question=question))]
         )
-        raw = msg.content.strip()
+        raw = msg.content.strip() if isinstance(msg.content, str) else ""
         return [k.strip() for k in raw.split(",") if k.strip()]
     except Exception as e:
         print(f"[analyzer] AI 关键词提取失败 ({question[:40]}...): {e}")

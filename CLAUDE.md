@@ -1,5 +1,17 @@
 # Deep Agent Project
 
+## 包管理
+
+本项目使用 **uv** 管理依赖。**禁止使用 `pip`**。
+
+```bash
+uv add <package>          # 安装依赖并写入 pyproject.toml
+uv add --dev <package>    # 安装开发依赖
+uv remove <package>       # 移除依赖
+uv sync                   # 同步环境
+uv run <script>           # 运行脚本
+```
+
 ## 项目结构
 
 ```
