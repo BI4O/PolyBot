@@ -28,13 +28,38 @@
     from src.services.news import load_config
     for src in load_config():
         print(f"[{src['category']}] {src['name']} -> {src['url']}")
+
+    # ── SQLite 缓存与搜索 ──
+    from src.services.news import init_db, insert_articles, search_news, get_stats, close_db
+    init_db()
+    count = insert_articles(await fetch_all_news())
+    results = search_news(["Bitcoin", "BTC"], since_hours=6)
+
+    # ── AI 关键词分析 ──
+    from src.services.news import extract_keywords, analyze_trending_markets
+    kw = await extract_keywords("Will Bitcoin hit $150K?")
+    analysis = await analyze_trending_markets(limit=5)
 """
 
+from src.services.news.analyzer import (
+    analyze_market,
+    analyze_trending_markets,
+    extract_keywords,
+)
 from src.services.news.client import fetch_all_news, fetch_feed, fetch_news_by_category, load_config
+from src.services.news.db import close_db, get_stats, init_db, insert_articles, search_news
 
 __all__ = [
+    "analyze_market",
+    "analyze_trending_markets",
+    "close_db",
+    "extract_keywords",
     "fetch_all_news",
-    "fetch_news_by_category",
     "fetch_feed",
+    "fetch_news_by_category",
+    "get_stats",
+    "init_db",
+    "insert_articles",
     "load_config",
+    "search_news",
 ]

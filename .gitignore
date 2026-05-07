@@ -19,3 +19,9 @@ wheels/
 
 # test
 .pytest_cache/
+
+# superposers
+docs/
+
+# Runtime data
+data/
