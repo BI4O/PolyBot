@@ -1,0 +1,225 @@
+# RSS 新闻源配置
+sources:
+  # ── 头部加密媒体 ──
+  - name: The Defiant
+    url: https://thedefiant.io/feed/
+    category: crypto
+    enabled: true
+
+  - name: CoinDesk
+    url: https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml
+    category: crypto
+    enabled: true
+
+  - name: CoinTelegraph
+    url: https://cointelegraph.com/rss
+    category: crypto
+    enabled: true
+
+  - name: CryptoPotato
+    url: https://cryptopotato.com/feed/
+    category: crypto
+    enabled: true
+
+  - name: CryptoSlate
+    url: https://cryptoslate.com/feed/
+    category: crypto
+    enabled: true
+
+  - name: CryptoNews
+    url: https://cryptonews.com/news/feed/
+    category: crypto
+    enabled: true
+
+  - name: SmartLiquidity
+    url: https://smartliquidity.info/feed/
+    category: crypto
+    enabled: true
+
+  - name: Decrypt
+    url: https://decrypt.co/feed
+    category: crypto
+    enabled: true
+
+  - name: The Block
+    url: https://www.theblock.co/rss.xml
+    category: crypto
+    enabled: true
+
+  - name: CryptoBriefing
+    url: https://cryptobriefing.com/feed/
+    category: crypto
+    enabled: true
+
+  - name: Daily Hodl
+    url: https://dailyhodl.com/feed/
+    category: crypto
+    enabled: true
+
+  - name: Bitcoinist
+    url: https://bitcoinist.com/feed/
+    category: crypto
+    enabled: true
+
+  - name: NewsBTC
+    url: https://www.newsbtc.com/feed
+    category: crypto
+    enabled: true
+
+  - name: Coinspeaker
+    url: https://www.coinspeaker.com/feed/
+    category: crypto
+    enabled: true
+
+  - name: Zeneca
+    url: https://www.zeneca.xyz/feed
+    category: crypto
+    enabled: true
+
+  - name: Cobie
+    url: https://cobie.substack.com/feed
+    category: crypto
+    enabled: true
+
+  # ── DeFi / 生态 ──
+  - name: Bankless
+    url: https://www.bankless.com/feed
+    category: defi
+    enabled: true
+
+  - name: Lido Blog
+    url: https://blog.lido.fi/rss/
+    category: defi
+    enabled: true
+
+  - name: EigenLayer Blog
+    url: https://www.blog.eigenlayer.xyz/rss/
+    category: defi
+    enabled: true
+
+  # ── 以太坊 ──
+  - name: Ethereum Blog
+    url: https://blog.ethereum.org/feed.xml
+    category: eth
+    enabled: true
+
+  - name: Vitalik Buterin
+    url: https://vitalik.eth.limo/feed.xml
+    category: eth
+    enabled: true
+
+  - name: The Daily Gwei
+    url: https://thedailygwei.substack.com/feed
+    category: eth
+    enabled: true
+
+  - name: Ethereum Research
+    url: https://ethresear.ch/latest.rss
+    category: eth
+    enabled: true
+
+  - name: Ben Edgington
+    url: https://benjaminion.xyz/newineth2/rss_feed.xml
+    category: eth
+    enabled: true
+
+  # ── 链上数据 & 研究 ──
+  - name: Glassnode
+    url: https://insights.glassnode.com/rss/
+    category: research
+    enabled: true
+
+  - name: Coin Metrics
+    url: https://coinmetrics.substack.com/feed
+    category: research
+    enabled: true
+
+  - name: Deribit Insights
+    url: https://insights.deribit.com/feed/
+    category: research
+    enabled: true
+
+  - name: a16z Crypto
+    url: https://a16zcrypto.substack.com/feed
+    category: research
+    enabled: true
+
+  - name: Flashbots
+    url: https://writings.flashbots.net/rss.xml
+    category: research
+    enabled: true
+
+  - name: Messari
+    url: https://messari.io/rss
+    category: research
+    enabled: false  # RSS 已下线
+
+  - name: Bitcoin Optech
+    url: https://bitcoinops.org/feed.xml
+    category: research
+    enabled: true
+
+  - name: Pantera Capital
+    url: https://panteracapital.com/blockchain-letter/feed/
+    category: research
+    enabled: false  # 403/SSL 拒绝连接
+
+  - name: Placeholder VC
+    url: https://www.placeholder.vc/blog?format=rss
+    category: research
+    enabled: true
+
+  # ── 宏观 ──
+  - name: Crypto Hayes
+    url: https://cryptohayes.substack.com/feed
+    category: macro
+    enabled: true
+
+  - name: Lyn Alden
+    url: https://www.lynalden.com/feed/
+    category: macro
+    enabled: false  # 403 Forbidden
+
+  # ── 监管 & 合规 ──
+  - name: Chainalysis
+    url: https://www.chainalysis.com/feed
+    category: regulation
+    enabled: true
+
+  # ── 传统金融 ──
+  - name: Yahoo Finance
+    url: https://finance.yahoo.com/news/rssindex
+    category: finance
+    enabled: true
+
+  - name: CNBC
+    url: https://www.cnbc.com/id/10000664/device/rss/rss.html
+    category: finance
+    enabled: true
+
+  # ── AI ──
+  - name: TechCrunch AI
+    url: https://techcrunch.com/category/artificial-intelligence/feed/
+    category: ai
+    enabled: true
+
+  - name: Latent Space
+    url: https://www.latent.space/feed
+    category: ai
+    enabled: true
+
+  - name: Simon Willison
+    url: https://simonwillison.net/atom/everything/
+    category: ai
+    enabled: true
+
+  - name: Gwern
+    url: https://gwern.substack.com/feed
+    category: ai
+    enabled: true
+
+  # ── 已禁用（源不可用）──
+  - name: Time NextAdvisor
+    url: https://time.com/nextadvisor/feed/
+    category: finance
+    enabled: false  # 返回 HTML，非 RSS

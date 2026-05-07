@@ -148,6 +148,12 @@ _MARKET_BY_TOKEN = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _clear_resolve_cache():
+    """每个测试前清理 _resolve_tag_slug 缓存，避免跨测试干扰。"""
+    _resolve_tag_slug.cache_clear()
+
+
 def _mock_http(status: int = 200, data: object = None) -> MagicMock:
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status
@@ -591,6 +597,36 @@ class TestListMarkets:
 
         assert result == []
 
+    def test_detail_false_enriches(self):
+        """detail=False 时裁剪字段并附上实时价格。"""
+        stack = ExitStack()
+        mock_get = stack.enter_context(
+            patch("src.services.polymarket.search.httpx.get")
+        )
+        mock_post = stack.enter_context(
+            patch("src.services.polymarket.search.httpx.post")
+        )
+        mock_get.return_value = _mock_http(data=_MARKETS_LIST)
+        mock_post.return_value = _mock_http(data=_BATCH_PRICES)
+
+        with stack:
+            result = list_markets(detail=False)
+
+        assert len(result) == 2
+        assert "options" in result[0]
+        assert result[0]["options"][0]["last"] == "0.56"
+        assert "outcomes" not in result[0]
+
+    def test_detail_true_returns_raw(self):
+        """detail=True 返回 API 原始字段（默认行为）。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get:
+            mock_get.return_value = _mock_http(data=_MARKETS_LIST)
+            result = list_markets(detail=True)
+
+        assert len(result) == 2
+        assert "outcomes" in result[0]
+        assert "clobTokenIds" in result[0]
+
 
 # ---------------------------------------------------------------------------
 # list_trending_markets
@@ -710,6 +746,17 @@ class TestResolveTagSlug:
 
         assert result == 235
         assert isinstance(result, int)
+
+    def test_cache_hits(self):
+        """同 slug 第二次调用不触发 HTTP 请求。"""
+        with patch(
+            "src.services.polymarket.search.get_tag_by_slug",
+            return_value=_TAG_RESPONSE,
+        ) as mock_get:
+            _resolve_tag_slug("bitcoin")
+            _resolve_tag_slug("bitcoin")
+
+        assert mock_get.call_count == 1
 
     def test_tag_not_found_propagates(self):
         """tag slug 不存在时透传 404 异常。"""

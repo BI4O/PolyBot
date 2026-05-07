@@ -1,5 +1,6 @@
 """Polymarket 市场搜索与查询服务."""
 
+import functools
 import json
 from typing import Literal
 
@@ -31,6 +32,7 @@ def search_markets_by_keyword(q: str, limit: int = 10, detail: bool = False) -> 
             for t in (event.get("tags") or [])
         ]
         for m in event.get("markets") or []:
+            m = dict(m)
             m["event"] = {"id": event.get("id"), "title": event.get("title")}
             m["_tags"] = tags
             markets.append(m)
@@ -54,17 +56,19 @@ def _batch_last_prices(token_ids: list[str]) -> dict[str, dict]:
         )
         if resp.status_code == 200:
             return {item["token_id"]: item for item in resp.json()}
-    except Exception:
-        pass
+    except httpx.HTTPError as e:
+        print(f"[polymarket] 批量拉取价格失败: {e}")
     return {}
 
 
 def _enrich_markets(markets: list[dict], limit: int) -> list[dict]:
     """裁剪市场列表为核心字段，并附上实时成交价和赔率倍数。"""
-    # 批量拉取所有 outcome token 的实时成交价
+    # 一次解析 clobTokenIds，避免循环内重复 json.loads
     all_token_ids = set()
     for m in markets:
-        all_token_ids.update(json.loads(m.get("clobTokenIds") or "[]"))
+        tids = json.loads(m.get("clobTokenIds") or "[]")
+        m["_tids"] = tids
+        all_token_ids.update(tids)
     price_map = _batch_last_prices(list(all_token_ids)) if all_token_ids else {}
 
     _ORDER = (
@@ -79,7 +83,7 @@ def _enrich_markets(markets: list[dict], limit: int) -> list[dict]:
             if k == "options":
                 outcomes = json.loads(m.get("outcomes") or "[]")
                 prices = json.loads(m.get("outcomePrices") or "[]")
-                tids = json.loads(m.get("clobTokenIds") or "[]")
+                tids = m["_tids"]
                 opts = []
                 for i in range(min(len(outcomes), len(prices))):
                     opt = {"name": outcomes[i], "price": prices[i]}
@@ -108,6 +112,7 @@ _ORDER_FIELDS = Literal[
 def list_markets(
     limit: int = 20,
     offset: int = 0,
+    detail: bool = True,
     order_by: _ORDER_FIELDS | None = None,
     ascending: bool = False,
     closed: bool | None = None,
@@ -124,6 +129,9 @@ def list_markets(
     include_tag: bool | None = None,
 ) -> list[dict]:
     """按条件筛选市场列表。默认按 id 升序（即创建时间先后）。
+
+    detail=True 返回 API 原始全量字段；False 时只保留核心字段，
+    且 options 中附带实时成交价、赔率倍数和隐含概率。
 
     按标签筛选时，可用 tag_slug（如 "politics"、"crypto"）或 tag_id（数字 ID）。
 
@@ -165,16 +173,18 @@ def list_markets(
         timeout=15,
     )
     resp.raise_for_status()
-    return resp.json()
+    raw = resp.json()
+    if not detail:
+        return _enrich_markets(raw, limit)
+    return raw
 
 
 def list_trending_markets(limit: int = 10, tag_slug: str | None = None) -> list[dict]:
     """按 24h 成交量降序返回热门市场，可指定 tag_slug 限定分类。"""
-    raw = list_markets(
-        limit=limit, order_by="volume24hr", ascending=False,
+    return list_markets(
+        limit=limit, detail=False, order_by="volume24hr", ascending=False,
         tag_slug=tag_slug,
     )
-    return _enrich_markets(raw, limit)
 
 
 def list_tags(limit: int = 100) -> list[dict]:
@@ -200,8 +210,9 @@ def get_tag_by_slug(slug: str) -> dict:
     return resp.json()
 
 
+@functools.cache
 def _resolve_tag_slug(slug: str) -> int:
-    """将 tag slug 解析为数字 ID，供 list_markets 使用。"""
+    """将 tag slug 解析为数字 ID，供 list_markets 使用。结果缓存避免重复 HTTP 请求。"""
     return int(get_tag_by_slug(slug)["id"])
 
 
@@ -242,10 +253,10 @@ if __name__ == "__main__":
     from rich import print as rprint
 
     rprint("=== search_markets_by_keyword('bitcoin', limit=3) ===")
-    rprint(search_markets_by_keyword("bitcoin", limit=10))
+    rprint(search_markets_by_keyword("bitcoin", limit=3))
 
     rprint("\n=== list_trending_markets(limit=3) ===")
-    # rprint(list_trending_markets(limit=3))
+    rprint(list_trending_markets(limit=3))
 
     rprint("\n=== get_market_by_slug('will-bitcoin-hit-150k-by-september-30') ===")
-    # rprint(get_market_by_slug("will-bitcoin-hit-150k-by-september-30"))
+    rprint(get_market_by_slug("will-bitcoin-hit-150k-by-september-30"))
