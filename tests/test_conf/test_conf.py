@@ -3,26 +3,26 @@
 
 class TestAgentBackend:
     def test_backend_imports(self):
-        from src.conf.agent_backend import agent_backend
+        from src.conf.agent_backend import AGENT_BACKEND
 
-        assert agent_backend is not None
+        assert AGENT_BACKEND is not None
 
     def test_composite_backend_has_skills_route(self):
-        from src.conf.agent_backend import agent_backend
+        from src.conf.agent_backend import AGENT_BACKEND
 
-        routes = agent_backend.routes
+        routes = AGENT_BACKEND.routes
         assert "/skills/" in routes
 
     def test_skills_backend_is_filesystem(self):
-        from src.conf.agent_backend import agent_backend
+        from src.conf.agent_backend import AGENT_BACKEND
         from deepagents.backends import FilesystemBackend
 
-        assert isinstance(agent_backend.routes["/skills/"], FilesystemBackend)
+        assert isinstance(AGENT_BACKEND.routes["/skills/"], FilesystemBackend)
 
     def test_skills_backend_virtual_mode(self):
-        from src.conf.agent_backend import agent_backend
+        from src.conf.agent_backend import AGENT_BACKEND
 
-        fb = agent_backend.routes["/skills/"]
+        fb = AGENT_BACKEND.routes["/skills/"]
         assert fb.virtual_mode is True
 
 
@@ -69,12 +69,14 @@ class TestAgentPrompts:
 
 class TestAgentTools:
     def test_tool_list_is_list(self):
-        from src.conf.agent_tools import HELLO_TOOLS
+        from src.conf.agent_tools import AGENT_TOOLS
 
-        assert isinstance(HELLO_TOOLS, list)
+        assert isinstance(AGENT_TOOLS, list)
 
-    def test_hello_tools_contains_get_weather(self):
-        from src.conf.agent_tools import HELLO_TOOLS
+    def test_agent_tools_has_coin_tools(self):
+        from src.conf.agent_tools import AGENT_TOOLS
 
-        names = {t.name for t in HELLO_TOOLS}
-        assert "get_weather" in names
+        names = {t.name for t in AGENT_TOOLS}
+        assert "search_coins" in names
+        assert "search_events" in names
+        assert "fetch_latest_news" in names

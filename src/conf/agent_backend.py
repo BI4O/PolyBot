@@ -11,7 +11,7 @@ from deepagents.backends import CompositeBackend, FilesystemBackend, StateBacken
 
 _SKILLS_ROOT = str(Path(__file__).resolve().parents[2] / "src" / "skills")
 
-agent_backend = CompositeBackend(
+AGENT_BACKEND = CompositeBackend(
     default=StateBackend(),
     routes={
         "/skills/": FilesystemBackend(

@@ -1,7 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "testopenai": "./src/agent/hello_agent.py:agent"
+    "base": "./src/agent/base_agent.py:agent"
   },
   "env": ".env"
 }

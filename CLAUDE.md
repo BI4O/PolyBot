@@ -39,7 +39,7 @@ The `reasoning_content` in the thinking mode must be passed back to the API.
 - **inbound** — 拦截 `_convert_dict_to_message`，用 `isinstance(msg, AIMessage)` 判断后提取 `reasoning_content` 到 `additional_kwargs`（注意不能用 `msg.type == "assistant"`，因为 `AIMessage.type` 返回 `"ai"`）。
 - **outbound** — 拦截 `_convert_message_to_dict`，检查 `additional_kwargs` 中的 `reasoning_content` 并写回请求 dict。
 
-只要 `agent_models` 在模型实例化前被 import，patch 即可生效。当前 `agent_backend` 和 `hello_agent` 的 import 链已经保证这个顺序。
+只要 `agent_models` 在模型实例化前被 import，patch 即可生效。当前 `AGENT_BACKEND` 和 `base_agent` 的 import 链已经保证这个顺序。
 
 ## langgraph dev 注意事项
 
