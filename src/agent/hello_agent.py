@@ -6,11 +6,11 @@ from src.conf.agent_backend import agent_backend
 from src.conf.agent_models import DEEPSEEK_V4_FLASH
 from src.conf.agent_prompts import HELLO_SYSTEM_PROMPT
 from src.conf.agent_skills import AGENT_SKILL_SOURCES
-from src.conf.agent_tools import HELLO_TOOLS
+from src.conf.agent_tools import AGENT_TOOLS
 
 agent = create_deep_agent(
     model=DEEPSEEK_V4_FLASH,
-    tools=HELLO_TOOLS,
+    tools=AGENT_TOOLS,
     system_prompt=HELLO_SYSTEM_PROMPT,
     backend=agent_backend,
     skills=AGENT_SKILL_SOURCES,
