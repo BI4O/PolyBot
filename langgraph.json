@@ -1,7 +1,10 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "base": "./src/agent/base_agent.py:agent"
+    "base": "./src/agent/ds_agent.py:agent"
   },
-  "env": ".env"
+  "env": ".env",
+  "watch": {
+    "ignore": [".venv/**"]
+  }
 }
