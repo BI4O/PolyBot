@@ -2,23 +2,25 @@
 
 import json
 from contextlib import ExitStack
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
-from src.services.polymarket.search import (
-    _batch_last_prices,
-    _enrich_markets,
-    _resolve_tag_slug,
+from src.services.polymarket.search import search_events_by_keyword
+from src.services.polymarket.markets import (
     get_market_by_id,
     get_market_by_slug,
     get_market_by_token_addr,
-    get_tag_by_slug,
     list_markets,
-    list_tags,
     list_trending_markets,
-    search_markets_by_keyword,
+)
+from src.services.polymarket.events import list_trending_events
+from src.services.polymarket.tags import get_tag_by_slug, list_tags, resolve_tag_slug
+from src.services.polymarket.utils import (
+    batch_last_prices as _batch_last_prices,
+    enrich_markets as _enrich_markets,
 )
 
 # ---------------------------------------------------------------------------
@@ -128,7 +130,15 @@ _BATCH_PRICES = [
     {"token_id": "t2", "price": "0.44", "side": "SELL"},
     {"token_id": "t3", "price": "0.52", "side": "SELL"},
     {"token_id": "t4", "price": "0.48", "side": "BUY"},
+    {"token_id": "e1", "price": "0.0108", "side": "BUY"},
+    {"token_id": "e2", "price": "0.9892", "side": "SELL"},
+    {"token_id": "e3", "price": "0.0130", "side": "BUY"},
+    {"token_id": "e4", "price": "0.9870", "side": "SELL"},
+    {"token_id": "e5", "price": "0.12", "side": "BUY"},
+    {"token_id": "e6", "price": "0.88", "side": "SELL"},
 ]
+
+_BATCH_PRICE_MAP = {item["token_id"]: item for item in _BATCH_PRICES}
 
 _MARKET_DETAIL = {
     "id": "573652",
@@ -151,7 +161,7 @@ _MARKET_BY_TOKEN = {
 @pytest.fixture(autouse=True)
 def _clear_resolve_cache():
     """每个测试前清理 _resolve_tag_slug 缓存，避免跨测试干扰。"""
-    _resolve_tag_slug.cache_clear()
+    resolve_tag_slug.cache_clear()
 
 
 def _mock_http(status: int = 200, data: object = None) -> MagicMock:
@@ -168,202 +178,163 @@ def _mock_http(status: int = 200, data: object = None) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# search_markets_by_keyword
+# search_events_by_keyword
 # ---------------------------------------------------------------------------
 
 
-class TestSearchMarketsByKeyword:
-    def test_detail_returns_raw_data(self):
-        """detail=True 返回原始数据 + 附加 event/tags，不截取字段。"""
-        with patch("src.services.polymarket.search.httpx.get") as mock_get:
+class TestSearchEventsByKeyword:
+    def test_returns_events_with_nested_markets(self):
+        """返回事件列表，每个事件内嵌 enriched markets。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
             mock_get.return_value = _mock_http(data=_SEARCH_RESPONSE)
-            result = search_markets_by_keyword("bitcoin", detail=True)
+            mock_post.return_value = _BATCH_PRICE_MAP
+            result = search_events_by_keyword("bitcoin")
 
         assert len(result) == 1
-        m = result[0]
+        ev = result[0]
+        assert ev["id"] == "36173"
+        assert ev["title"] == "When will Bitcoin hit $150k?"
+        assert ev["slug"] == "when-will-bitcoin-hit-150k"
+        assert len(ev["markets"]) == 1
+
+        m = ev["markets"][0]
         assert m["id"] == "573652"
         assert m["question"] == "Will Bitcoin hit $150k by September 30?"
-        assert m["event"] == {"id": "36173", "title": "When will Bitcoin hit $150k?"}
-        assert m["_tags"] == [
+        assert m["volume"] == "778900"
+        # options 已配对含实时价格
+        assert m["options"] == [
+            {"name": "Yes", "price": "0.45", "side": "BUY", "last": "0.46",
+             "multiplier": 2.17, "pct": 46.0},
+            {"name": "No", "price": "0.55", "side": "SELL", "last": "0.54",
+             "multiplier": 1.85, "pct": 54.0},
+        ]
+        # tags 在 event 级别
+        assert ev["tags"] == [
             {"id": "235", "label": "Bitcoin", "slug": "bitcoin"},
             {"id": "21", "label": "Crypto", "slug": "crypto"},
         ]
-        # 保留所有原始字段
-        assert "startDate" in m
-        assert "volume" in m
+        assert "outcomes" not in m
+        assert "clobTokenIds" not in m
 
-    def test_detail_false_trims_and_enriches(self):
-        """detail=False 时裁剪字段并附上实时价格。"""
-        stack = ExitStack()
-        mock_get = stack.enter_context(
-            patch("src.services.polymarket.search.httpx.get")
-        )
-        mock_post = stack.enter_context(
-            patch("src.services.polymarket.search.httpx.post")
-        )
-        mock_get.return_value = _mock_http(data=_SEARCH_RESPONSE)
-        mock_post.return_value = _mock_http(data=_BATCH_PRICES)
-
-        with stack:
-            result = search_markets_by_keyword("bitcoin")
-
-        assert len(result) == 1
-        item = result[0]
-        # 核心字段
-        assert item["id"] == "573652"
-        assert item["slug"] == "will-bitcoin-hit-150k-by-september-30"
-        assert item["question"] == "Will Bitcoin hit $150k by September 30?"
-        assert item["event"] == {"id": "36173", "title": "When will Bitcoin hit $150k?"}
-        assert item["volume"] == "778900"
-        # 没有原始 API 赘余字段
-        assert "outcomes" not in item
-        assert "clobTokenIds" not in item
-        # options 已配对
-        assert item["options"] == [
-            {
-                "name": "Yes", "price": "0.45",
-                "side": "BUY", "last": "0.46",
-                "multiplier": 2.17, "pct": 46.0,
-            },
-            {
-                "name": "No", "price": "0.55",
-                "side": "SELL", "last": "0.54",
-                "multiplier": 1.85, "pct": 54.0,
-            },
-        ]
-
-    def test_limit_truncates_results(self):
-        """limit 参数控制返回条数。"""
+    def test_limit_truncates_events(self):
+        """limit 控制返回事件数量。"""
         data = {
             "events": [
-                {"id": str(i), "title": f"Event {i}", "slug": f"e{i}", "markets": [
-                    {"id": str(100 + i), "slug": f"m-{100+i}", "question": f"Q {i}",
-                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
-                     "clobTokenIds": '["x","y"]', "volume": "100", "marketMakerAddress": "0x"},
-                ]}
+                {"id": str(i), "title": f"E{i}", "slug": f"e{i}", "volume": 100,
+                 "markets": [{"id": str(100 + i), "question": f"Q{i}",
+                              "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                              "clobTokenIds": '["x","y"]', "volume": "1"}]}
                 for i in range(5)
             ],
         }
         with patch("src.services.polymarket.search.httpx.get") as mock_get, \
-             patch("src.services.polymarket.search.httpx.post") as mock_post:
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
             mock_get.return_value = _mock_http(data=data)
-            mock_post.return_value = _mock_http(data=[])
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test", limit=2)
 
-            result_full = search_markets_by_keyword("test", limit=10, detail=True)
-            result_limited = search_markets_by_keyword("test", limit=2, detail=True)
-
-        assert len(result_full) == 5
-        assert len(result_limited) == 2
+        assert len(result) == 2
 
     def test_empty_search_returns_empty_list(self):
-        """搜索结果为空时返回 []. """
         with patch("src.services.polymarket.search.httpx.get") as mock_get:
             mock_get.return_value = _mock_http(data={"events": []})
-            result = search_markets_by_keyword("nonexistent")
+            result = search_events_by_keyword("nonexistent")
         assert result == []
 
     def test_missing_markets_field_does_not_crash(self):
-        """event 没有 markets 字段时不崩溃。"""
         with patch("src.services.polymarket.search.httpx.get") as mock_get:
             mock_get.return_value = _mock_http(
                 data={"events": [{"id": "1", "title": "E1", "slug": "e1"}]}
             )
-            result = search_markets_by_keyword("test")
-        assert result == []
+            result = search_events_by_keyword("test")
+        assert len(result) == 1
+        assert result[0]["markets"] == []
 
     def test_no_events_key_returns_empty(self):
-        """响应缺少 events 键时返回 []。"""
         with patch("src.services.polymarket.search.httpx.get") as mock_get:
             mock_get.return_value = _mock_http(data={})
-            result = search_markets_by_keyword("test")
+            result = search_events_by_keyword("test")
         assert result == []
 
     def test_raises_on_http_error(self):
         with patch("src.services.polymarket.search.httpx.get") as mock_get:
             mock_get.return_value = _mock_http(status=500, data=None)
             with pytest.raises(httpx.HTTPStatusError):
-                search_markets_by_keyword("bitcoin")
+                search_events_by_keyword("bitcoin")
 
-    def test_multiple_events_are_flattened(self):
-        """多个 event 下的 market 全部拍平到一个列表。"""
+    def test_multiple_events_preserved_in_order(self):
+        """多个 event 各自独立返回，不拍平。"""
         data = {
             "events": [
-                {"id": "1", "title": "E1", "slug": "e1", "tags": [], "markets": [
-                    {"id": "10", "slug": "m10", "question": "Q10",
+                {"id": "1", "title": "E1", "slug": "e1", "volume": 200, "tags": [], "markets": [
+                    {"id": "10", "question": "Q10", "slug": "m10",
                      "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
-                     "clobTokenIds": '["a","b"]', "volume": "1", "marketMakerAddress": "0x"},
+                     "clobTokenIds": '["a","b"]', "volume": "1"},
                 ]},
-                {"id": "2", "title": "E2", "slug": "e2", "tags": [], "markets": [
-                    {"id": "20", "slug": "m20", "question": "Q20",
+                {"id": "2", "title": "E2", "slug": "e2", "volume": 100, "tags": [], "markets": [
+                    {"id": "20", "question": "Q20", "slug": "m20",
                      "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
-                     "clobTokenIds": '["c","d"]', "volume": "2", "marketMakerAddress": "0x"},
+                     "clobTokenIds": '["c","d"]', "volume": "2"},
                 ]},
             ],
         }
-        with patch("src.services.polymarket.search.httpx.get") as mock_get:
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
             mock_get.return_value = _mock_http(data=data)
-            result = search_markets_by_keyword("test", detail=True)
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test")
 
         assert len(result) == 2
-        assert result[0]["event"]["title"] == "E1"
-        assert result[1]["event"]["title"] == "E2"
+        assert result[0]["title"] == "E1"
+        assert result[0]["markets"][0]["question"] == "Q10"
 
     def test_null_tags_does_not_crash(self):
-        """event.tags 为 None 时 _tags 应留空列表。"""
-        data = {
-            "events": [
-                {"id": "1", "title": "E1", "slug": "e1", "tags": None, "markets": [
-                    {"id": "10", "slug": "m10", "question": "Q10",
-                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
-                     "clobTokenIds": '["a","b"]', "volume": "1", "marketMakerAddress": "0x"},
-                ]},
-            ],
-        }
         with patch("src.services.polymarket.search.httpx.get") as mock_get:
-            mock_get.return_value = _mock_http(data=data)
-            result = search_markets_by_keyword("test", detail=True)
-
-        assert result[0]["_tags"] == []
+            mock_get.return_value = _mock_http(data={
+                "events": [{"id": "1", "title": "E1", "slug": "e1", "tags": None,
+                            "volume": 0, "markets": []}],
+            })
+            result = search_events_by_keyword("test")
+        assert result[0]["tags"] == []
 
     def test_partial_price_data_graceful(self):
-        """部分 token 没有实时价格时，对应 option 只保留 name/price。"""
-        stack = ExitStack()
-        mock_get = stack.enter_context(patch("src.services.polymarket.search.httpx.get"))
-        mock_post = stack.enter_context(patch("src.services.polymarket.search.httpx.post"))
-        mock_get.return_value = _mock_http(data=_SEARCH_RESPONSE)
-        # price_map 只包含 Yes token（111），不包含 No token（222）
-        mock_post.return_value = _mock_http(data=[
-            {"token_id": "111", "price": "0.46", "side": "BUY"},
-        ])
-        with stack:
-            result = search_markets_by_keyword("bitcoin")
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=_SEARCH_RESPONSE)
+            mock_post.return_value = {"111": {"token_id": "111", "price": "0.46", "side": "BUY"}}
+            result = search_events_by_keyword("bitcoin")
 
-        opts = result[0]["options"]
-        # Yes：有实时价格
+        opts = result[0]["markets"][0]["options"]
         assert opts[0]["name"] == "Yes"
         assert opts[0]["last"] == "0.46"
-        # No：price_map 中不存在，不能有 last/multiplier/pct
         assert opts[1] == {"name": "No", "price": "0.55"}
 
-    def test_price_zero_handling(self):
-        """价格为 0 时 multiplier 应为 None，避免除零错误。"""
-        markets = [
-            {
-                "id": "1", "slug": "m1", "question": "Q?",
-                "outcomes": '["Yes","No"]', "outcomePrices": '["0","1"]',
-                "clobTokenIds": '["a","b"]', "volume": "100",
-                "marketMakerAddress": "0x",
-            },
-        ]
-        with patch(
-            "src.services.polymarket.search._batch_last_prices",
-            return_value={"a": {"token_id": "a", "price": "0", "side": "BUY"}},
-        ):
-            result = _enrich_markets(markets, limit=10)
+    def test_markets_sorted_by_volume(self):
+        """event 内的 markets 按 volume 降序排列。"""
+        data = {
+            "events": [{
+                "id": "1", "title": "E1", "slug": "e1", "volume": 1000, "tags": [], "markets": [
+                    {"id": "1a", "question": "Low", "slug": "m1",
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["a","b"]', "volume": "10"},
+                    {"id": "1b", "question": "High", "slug": "m2",
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["c","d"]', "volume": "100"},
+                    {"id": "1c", "question": "Mid", "slug": "m3",
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["e","f"]', "volume": "50"},
+                ],
+            }],
+        }
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=data)
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test")
 
-        opt = result[0]["options"][0]
-        assert opt["price"] == "0"
-        assert opt["multiplier"] is None  # 1/0 没有意义
+        volumes = [float(m["volume"]) for m in result[0]["markets"]]
+        assert volumes == sorted(volumes, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +351,11 @@ class TestBatchLastPrices:
             {"token_id": "111", "price": "0.46", "side": "BUY"},
             {"token_id": "222", "price": "0.54", "side": "SELL"},
         ]
-        with patch("src.services.polymarket.search.httpx.post") as mock_post:
-            mock_post.return_value = _mock_http(data=prices)
+        mock_resp = _mock_http(data=prices)
+        mock_resp.status_code = 200
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_resp)
             result = _batch_last_prices(["111", "222"])
 
         assert result == {
@@ -390,17 +364,19 @@ class TestBatchLastPrices:
         }
 
     def test_http_error_returns_empty(self):
-        with patch("src.services.polymarket.search.httpx.post") as mock_post:
-            mock_post.return_value = _mock_http(status=500, data=None)
+        mock_resp = _mock_http(status=500, data=None)
+
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_resp)
             result = _batch_last_prices(["111"])
         assert result == {}
 
     def test_exception_during_request_returns_empty(self):
         """httpx.post 抛出异常时返回 {}，不冒泡。"""
-        with patch(
-            "src.services.polymarket.search.httpx.post",
-            side_effect=httpx.TimeoutException("timeout"),
-        ):
+        with patch("httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.post = AsyncMock(
+                side_effect=httpx.TimeoutException("timeout")
+            )
             result = _batch_last_prices(["111"])
         assert result == {}
 
@@ -425,7 +401,7 @@ class TestEnrichMarkets:
             },
         ]
         with patch(
-            "src.services.polymarket.search._batch_last_prices",
+            "src.services.polymarket.utils.batch_last_prices",
             return_value={
                 "a": {"token_id": "a", "price": "0.55", "side": "BUY"},
                 "b": {"token_id": "b", "price": "0.45", "side": "SELL"},
@@ -448,7 +424,7 @@ class TestEnrichMarkets:
             for i in range(5)
         ]
         with patch(
-            "src.services.polymarket.search._batch_last_prices",
+            "src.services.polymarket.utils.batch_last_prices",
             return_value={},
         ):
             result = _enrich_markets(markets, limit=2)
@@ -459,7 +435,7 @@ class TestEnrichMarkets:
             {"id": "1", "slug": "m1", "question": "Q?"},
         ]
         with patch(
-            "src.services.polymarket.search._batch_last_prices",
+            "src.services.polymarket.utils.batch_last_prices",
             return_value={},
         ):
             result = _enrich_markets(markets, limit=10)
@@ -478,7 +454,7 @@ class TestEnrichMarkets:
             },
         ]
         with patch(
-            "src.services.polymarket.search._batch_last_prices",
+            "src.services.polymarket.utils.batch_last_prices",
             return_value={},
         ):
             result = _enrich_markets(markets, limit=10)
@@ -604,10 +580,10 @@ class TestListMarkets:
             patch("src.services.polymarket.search.httpx.get")
         )
         mock_post = stack.enter_context(
-            patch("src.services.polymarket.search.httpx.post")
+            patch("src.services.polymarket.utils.batch_last_prices")
         )
         mock_get.return_value = _mock_http(data=_MARKETS_LIST)
-        mock_post.return_value = _mock_http(data=_BATCH_PRICES)
+        mock_post.return_value = _BATCH_PRICE_MAP
 
         with stack:
             result = list_markets(detail=False)
@@ -640,10 +616,10 @@ class TestListTrendingMarkets:
             patch("src.services.polymarket.search.httpx.get")
         )
         mock_post = stack.enter_context(
-            patch("src.services.polymarket.search.httpx.post")
+            patch("src.services.polymarket.utils.batch_last_prices")
         )
         mock_get.return_value = _mock_http(data=_MARKETS_LIST)
-        mock_post.return_value = _mock_http(data=_BATCH_PRICES)
+        mock_post.return_value = _BATCH_PRICE_MAP
 
         with stack:
             result = list_trending_markets(limit=2)
@@ -658,14 +634,14 @@ class TestListTrendingMarkets:
             patch("src.services.polymarket.search.httpx.get")
         )
         mock_post = stack.enter_context(
-            patch("src.services.polymarket.search.httpx.post")
+            patch("src.services.polymarket.utils.batch_last_prices")
         )
         # 三次调用: tag slug 解析 → markets → 已由 _enrich_markets 触发
         mock_get.side_effect = [
             _mock_http(data=_TAG_RESPONSE),
             _mock_http(data=_MARKETS_LIST),
         ]
-        mock_post.return_value = _mock_http(data=_BATCH_PRICES)
+        mock_post.return_value = _BATCH_PRICE_MAP
 
         with stack:
             result = list_trending_markets(limit=2, tag_slug="bitcoin")
@@ -674,16 +650,308 @@ class TestListTrendingMarkets:
 
     def test_empty_list(self):
         with patch("src.services.polymarket.search.httpx.get") as mock_get, \
-             patch("src.services.polymarket.search.httpx.post") as mock_post:
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
             mock_get.return_value = _mock_http(data=[])
-            mock_post.return_value = _mock_http(data=[])
+            mock_post.return_value = {}
             result = list_trending_markets()
 
         assert result == []
 
 
 # ---------------------------------------------------------------------------
-# list_tags
+# list_trending_events — 基于官网真实数据验证
+# ---------------------------------------------------------------------------
+
+
+_FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+class TestListTrendingEvents:
+    """使用 Polymarket 官网首页真实数据验证 list_trending_events。"""
+
+    @pytest.fixture(autouse=True)
+    def _load_fixtures(self):
+        with open(_FIXTURE_DIR / "events_keyset_response.json") as f:
+            self.events_data = json.load(f)
+        with open(_FIXTURE_DIR / "batch_prices_response.json") as f:
+            raw_prices = json.load(f)
+            self.prices_data = {item["token_id"]: item for item in raw_prices}
+
+    def test_returns_events_matching_homepage(self):
+        """返回事件列表，每个事件包含 enriched markets。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=self.events_data)
+            mock_post.return_value = self.prices_data
+
+            result = list_trending_events(limit=3)
+
+        assert len(result) == 3
+
+        for ev in result:
+            # Event 级别字段
+            assert "id" in ev and "title" in ev and "slug" in ev
+            assert isinstance(ev["volume"], float)
+            assert isinstance(ev["closed"], bool)
+            assert isinstance(ev["tags"], list)
+            assert isinstance(ev["markets"], list)
+
+            # Markets 内嵌 enrichment
+            for m in ev["markets"]:
+                assert "id" in m and "question" in m
+                assert isinstance(m["options"], list)
+                for opt in m["options"]:
+                    assert "name" in opt and "price" in opt
+
+    def test_sorted_by_event_volume(self):
+        """Event 按总成交量降序排列（与官网一致）。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=self.events_data)
+            mock_post.return_value = self.prices_data
+
+            result = list_trending_events(limit=10)
+
+        volumes = [ev["volume"] for ev in result]
+        assert volumes == sorted(volumes, reverse=True), \
+            "Event 成交量未按降序排列"
+
+    def test_default_excludes_closed_markets(self):
+        """默认 closed=False 过滤掉已结算的 market。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=self.events_data)
+            mock_post.return_value = self.prices_data
+
+            result = list_trending_events(limit=50)
+
+        # 每个 event 内的 market 都不应该已结算
+        for ev in result:
+            for m in ev["markets"]:
+                for opt in m["options"]:
+                    p = float(opt["price"])
+                    assert 0 < p < 1, f"包含已结算 market: {m['question']} price={p}"
+
+    def test_tag_slug_filters_by_category(self):
+        """指定 tag_slug 时，API 请求参数应包含它。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=self.events_data)
+            mock_post.return_value = self.prices_data
+
+            list_trending_events(limit=3, tag_slug="sports")
+
+            # 验证请求参数
+            call_kwargs = mock_get.call_args[1]
+            params = call_kwargs.get("params", {})
+            assert params.get("tag_slug") == "sports"
+
+    def test_empty_events_returns_empty_list(self):
+        """events/keyset 返回空时，函数应返回空列表。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data={"events": []})
+            mock_post.return_value = {}
+            result = list_trending_events(limit=5)
+
+    def test_default_excludes_closed_markets(self):
+        """默认 closed=False 应过滤掉已结算的市场。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=self.events_data)
+            mock_post.return_value = self.prices_data
+
+            result = list_trending_events(limit=50)
+
+        # 所有返回的 markets 都不应该是已结算的（price 为 0 或 1）
+        for ev in result:
+            for m in ev["markets"]:
+                for opt in m["options"]:
+                    p = float(opt["price"])
+                    assert 0 < p < 1, f"包含已结算市场: {m['question']} price={p}"
+
+    def test_tag_slug_filters_by_category(self):
+        """指定 tag_slug 时，API 请求参数应包含它。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=self.events_data)
+            mock_post.return_value = self.prices_data
+
+            list_trending_events(limit=3, tag_slug="sports")
+
+            # 验证请求参数
+            call_kwargs = mock_get.call_args[1]
+            assert "sports" in str(call_kwargs.get("params", {}))
+
+    def test_empty_events_returns_empty_list(self):
+        """events/keyset 返回空时，函数应返回空列表。"""
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data={"events": []})
+            mock_post.return_value = {}
+            result = list_trending_events(limit=5)
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# is_market_closed
+# ---------------------------------------------------------------------------
+
+
+class TestIsMarketClosed:
+    """is_market_closed 辅助函数的单元测试（不涉及 HTTP 请求）。"""
+
+    def test_closed_field_true(self):
+        from src.services.polymarket.utils import is_market_closed
+        assert is_market_closed({"closed": True}) is True
+        assert is_market_closed({"closed": "true"}) is True
+
+    def test_closed_field_false(self):
+        from src.services.polymarket.utils import is_market_closed
+        assert is_market_closed({"closed": False}) is False
+        assert is_market_closed({"closed": "false"}) is False
+
+    def test_closed_field_missing_enddate_past(self):
+        """closed 字段缺失，endDate 在过去 → True"""
+        from src.services.polymarket.utils import is_market_closed
+        assert is_market_closed({"endDate": "2020-01-01T00:00:00Z"}) is True
+
+    def test_closed_field_missing_enddate_future(self):
+        """closed 字段缺失，endDate 在未来 → False"""
+        from src.services.polymarket.utils import is_market_closed
+        assert is_market_closed({"endDate": "2099-01-01T00:00:00Z"}) is False
+
+    def test_no_closed_no_enddate(self):
+        """两个字段都不存在 → None"""
+        from src.services.polymarket.utils import is_market_closed
+        assert is_market_closed({}) is None
+
+
+# ---------------------------------------------------------------------------
+# search_events_by_keyword — closed 参数
+# ---------------------------------------------------------------------------
+
+
+class TestSearchEventsClosedFilter:
+    """search_events_by_keyword closed 过滤测试。"""
+
+    def test_closed_true_keeps_only_closed(self):
+        """closed=True 只保留已结束的市场。"""
+        data = {
+            "events": [{
+                "id": "1", "title": "E1", "slug": "e1", "volume": 0, "tags": [], "markets": [
+                    {"id": "10", "question": "Q1", "closed": True,
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["a","b"]', "volume": "1"},
+                ],
+            }],
+        }
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=data)
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test", closed=True)
+        assert len(result[0]["markets"]) == 1
+        assert result[0]["markets"][0]["id"] == "10"
+
+    def test_closed_false_keeps_only_open(self):
+        """closed=False 只保留未结束的 market。"""
+        data = {
+            "events": [{
+                "id": "1", "title": "E1", "slug": "e1", "volume": 0, "tags": [], "markets": [
+                    {"id": "10", "question": "Q1", "closed": True,
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["a","b"]', "volume": "1"},
+                    {"id": "11", "question": "Q2", "closed": False,
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["c","d"]', "volume": "2"},
+                ],
+            }],
+        }
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=data)
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test", closed=False)
+        assert len(result[0]["markets"]) == 1
+        assert result[0]["markets"][0]["id"] == "11"
+
+    def test_closed_default_none_no_filter(self):
+        """closed=None 不过滤。"""
+        data = {
+            "events": [{
+                "id": "1", "title": "E1", "slug": "e1", "volume": 0, "tags": [], "markets": [
+                    {"id": "10", "question": "Q1", "closed": True,
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["a","b"]', "volume": "1"},
+                    {"id": "11", "question": "Q2", "closed": False,
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["c","d"]', "volume": "2"},
+                ],
+            }],
+        }
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=data)
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test")
+        assert len(result[0]["markets"]) == 2
+
+    def test_closed_filter_with_enrich(self):
+        """closed 过滤后 enrichment 仍正常。"""
+        data = {
+            "events": [{
+                "id": "1", "title": "E1", "slug": "e1", "volume": 0, "tags": [], "markets": [
+                    {"id": "10", "question": "Q1", "closed": False,
+                     "outcomes": '["Yes","No"]', "outcomePrices": '["0.5","0.5"]',
+                     "clobTokenIds": '["x","y"]', "volume": "1"},
+                ],
+            }],
+        }
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=data)
+            mock_post.return_value = {}
+            result = search_events_by_keyword("test", closed=False)
+        assert len(result[0]["markets"]) == 1
+        assert "options" in result[0]["markets"][0]
+
+
+# ---------------------------------------------------------------------------
+# list_trending_markets — closed 参数透传
+# ---------------------------------------------------------------------------
+
+
+class TestListTrendingMarketsClosed:
+    """list_trending_markets 的 closed 参数透传到 list_markets。"""
+
+    def test_closed_false_sends_param(self):
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=[])
+            mock_post.return_value = {}
+            list_trending_markets(limit=1, closed=False)
+        _, kwargs = mock_get.call_args
+        assert kwargs["params"].get("closed") == "false"
+
+    def test_closed_true_sends_param(self):
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=[])
+            mock_post.return_value = {}
+            list_trending_markets(limit=1, closed=True)
+        _, kwargs = mock_get.call_args
+        assert kwargs["params"].get("closed") == "true"
+
+    def test_closed_none_omits_param(self):
+        with patch("src.services.polymarket.search.httpx.get") as mock_get, \
+             patch("src.services.polymarket.utils.batch_last_prices") as mock_post:
+            mock_get.return_value = _mock_http(data=[])
+            mock_post.return_value = {}
+            list_trending_markets(limit=1)
+        _, kwargs = mock_get.call_args
+        assert "closed" not in kwargs["params"]
 # ---------------------------------------------------------------------------
 
 
@@ -739,10 +1007,10 @@ class TestGetTagBySlug:
 class TestResolveTagSlug:
     def test_returns_int_id(self):
         with patch(
-            "src.services.polymarket.search.get_tag_by_slug",
+            "src.services.polymarket.tags.get_tag_by_slug",
             return_value=_TAG_RESPONSE,
         ):
-            result = _resolve_tag_slug("bitcoin")
+            result = resolve_tag_slug("bitcoin")
 
         assert result == 235
         assert isinstance(result, int)
@@ -750,24 +1018,24 @@ class TestResolveTagSlug:
     def test_cache_hits(self):
         """同 slug 第二次调用不触发 HTTP 请求。"""
         with patch(
-            "src.services.polymarket.search.get_tag_by_slug",
+            "src.services.polymarket.tags.get_tag_by_slug",
             return_value=_TAG_RESPONSE,
         ) as mock_get:
-            _resolve_tag_slug("bitcoin")
-            _resolve_tag_slug("bitcoin")
+            resolve_tag_slug("bitcoin")
+            resolve_tag_slug("bitcoin")
 
         assert mock_get.call_count == 1
 
     def test_tag_not_found_propagates(self):
         """tag slug 不存在时透传 404 异常。"""
         with patch(
-            "src.services.polymarket.search.get_tag_by_slug",
+            "src.services.polymarket.tags.get_tag_by_slug",
             side_effect=httpx.HTTPStatusError(
                 "404", request=MagicMock(), response=MagicMock(),
             ),
         ):
             with pytest.raises(httpx.HTTPStatusError):
-                _resolve_tag_slug("nonexistent")
+                resolve_tag_slug("nonexistent")
 
 
 # ---------------------------------------------------------------------------
