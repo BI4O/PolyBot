@@ -15,6 +15,7 @@ wheels/
 # All dot files (except those explicitly allowed)
 .*
 !.gitignore
+!.gitattributes
 !.python-version
 
 # test
