@@ -7,8 +7,9 @@ Monkey-patches langchain_openai to preserve `reasoning_content`
 import typing
 
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import AIMessage
+from langchain_deepseek import ChatDeepSeek
 from langchain_openai.chat_models import base as _lc_openai_base  # monkey-patch target
 
 load_dotenv()
@@ -57,8 +58,16 @@ _lc_openai_base._convert_message_to_dict = _patched_convert_message_to_dict
 # Models
 # ---------------------------------------------------------------------------
 
-DEEPSEEK_V4_FLASH = init_chat_model(
+# ChatOpenAI-based (openai: prefix via OPENAI_BASE_URL / .env)
+OPENAI_DEEPSEEK_V4_FLASH = init_chat_model(
     model="openai:deepseek-v4-flash",
+    timeout=20,
+    max_retries=2,
+)
+
+# ChatDeepSeek native adapter (reads DEEPSEEK_API_KEY from env)
+DEEPSEEK_V4_FLASH = ChatDeepSeek(
+    model="deepseek-v4-flash",
     timeout=20,
     max_retries=2,
 )
