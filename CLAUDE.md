@@ -41,6 +41,13 @@ The `reasoning_content` in the thinking mode must be passed back to the API.
 
 只要 `agent_models` 在模型实例化前被 import，patch 即可生效。当前 `AGENT_BACKEND` 和 `base_agent` 的 import 链已经保证这个顺序。
 
+## Git 提交流程
+
+**禁止直接 add 和 commit。** 所有改动完成后：
+1. 先让我检查一遍改动
+2. 我确认没问题后，由我提议 `git add` 哪些文件
+3. 等我确认 **"好，提交吧"** 之后再执行 commit
+
 ## langgraph dev 注意事项
 
 **Windows 上 `langgraph dev` 的 Ctrl+C 是假的**——它用 `os.killpg`（Unix only）杀子进程，Windows 无效。必须手动杀端口。
@@ -71,3 +78,56 @@ uv run -m src.run.langgraph 2025
 ```
 
 支持在 `src/run/langgraph.py` 顶部修改默认 `PORT`。
+
+## Polymarket API 概念
+
+### Gamma vs CLOB
+
+| API | 用途 | 需认证？ |
+|-----|------|----------|
+| **Gamma** (`gamma-api.polymarket.com`) | 浏览市场/事件/标签/搜索 | 不需要 |
+| **CLOB** (`clob.polymarket.com`) | 订单簿、价格、下单/撤单 | 读公开，写需要 |
+
+### Event 与 Market
+
+- **Event** = 容器，组织一个或多个相关 Market，**本身不可交易**
+- **Market** = 最小可交易单元，一个 Yes/No 二元问题
+- 每个 Market 有 Yes/No 两种 **Token**（ERC1155 代币），CLOB 上实际交易的是 Token
+
+### 三种获取市场数据策略
+
+1. **By Slug** — 知道 URL slug 直接取
+2. **By Tags** — `tag_id` / `tag_slug` 按分类过滤
+3. **Via Events** — 拿活跃事件（`active=true&closed=false`），响应自带 markets
+
+### 分页
+
+| 方式 | 适用端点 |
+|------|----------|
+| `limit + offset` | `/markets`、`/tags` 等 |
+| **keyset cursor** | `/events/keyset` — 响应带 `next_cursor`，传 `after_cursor` 翻页，**不接收 offset** |
+
+### 频率限制（关键）
+
+| 端点 | 限制 |
+|------|------|
+| Gamma `/markets` | 300 / 10s |
+| Gamma `/events` | 500 / 10s |
+| Gamma `/public-search` | 350 / 10s |
+| Gamma `/tags` | 200 / 10s |
+| CLOB `/last-trades-prices` | 9000 / 10s（通用层） |
+| 全局 | 15000 / 10s |
+
+超出后排队延迟，不拒绝。`last-trades-prices` 一次最多查 **500 个 token**。
+
+### 模块结构
+
+```
+src/services/polymarket/
+├── __init__.py     # 统一导出
+├── utils.py        # 常量 + 工具 (is_market_closed, batch_last_prices, enrich_markets)
+├── search.py       # 关键词搜索
+├── markets.py      # 市场查询 (list_markets, list_trending_markets, get_market_by_*)
+├── events.py       # 首页热门 (list_trending_events)
+└── tags.py         # 标签 (list_tags, get_tag_by_slug, resolve_tag_slug)
+```
