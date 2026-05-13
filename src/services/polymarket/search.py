@@ -7,7 +7,7 @@ import httpx
 from src.services.polymarket import utils
 
 
-def search_events_by_keyword(
+async def search_events_by_keyword(
     q: str,
     limit: int = 10,
     closed: bool | None = None,
@@ -25,14 +25,14 @@ def search_events_by_keyword(
     Returns:
         事件列表，结构同 ``list_trending_events``。每个事件含 ``markets`` 列表。
     """
-    resp = httpx.get(
-        f"{utils._GAMMA_URL}/public-search",
-        params={"q": q, "limit_per_type": limit},
-        headers=utils._HEADERS,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    raw = resp.json()
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._GAMMA_URL}/public-search",
+            params={"q": q, "limit_per_type": limit},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
     events = raw.get("events") or []
 
     # 一次批量拉取所有 token 的实时价格
@@ -42,7 +42,7 @@ def search_events_by_keyword(
             tids = json.loads(m.get("clobTokenIds") or "[]")
             m["_tids"] = tids
             all_token_ids.update(tids)
-    price_map = utils.batch_last_prices(list(all_token_ids)) if all_token_ids else {}
+    price_map = await utils.batch_last_prices_async(list(all_token_ids)) if all_token_ids else {}
 
     _MK_ORDER = (
         "id",

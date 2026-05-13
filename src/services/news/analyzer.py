@@ -58,7 +58,7 @@ async def analyze_market(market: dict, since_hours: int = 6) -> dict:
 async def analyze_trending_markets(limit: int = 10, since_hours: int = 6) -> list[dict]:
     """获取热门市场，逐个分析关键词并搜索相关新闻。"""
     from src.services.polymarket import list_trending_markets
-    markets = list_trending_markets(limit=limit)
+    markets = await list_trending_markets(limit=limit)
     results = []
     for m in markets:
         result = await analyze_market(m, since_hours=since_hours)

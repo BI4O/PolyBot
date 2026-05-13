@@ -7,7 +7,7 @@ import httpx
 from src.services.polymarket import utils
 
 
-def list_trending_events(
+async def list_trending_events(
     limit: int = 10,
     tag_slug: str | None = None,
     closed: bool = False,
@@ -60,14 +60,14 @@ def list_trending_events(
     if tag_slug is not None:
         params["tag_slug"] = tag_slug
 
-    resp = httpx.get(
-        f"{utils._GAMMA_URL}/events/keyset",
-        params=params,
-        headers=utils._HEADERS,
-        timeout=15,
-    )
-    resp.raise_for_status()
-    raw = resp.json()
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._GAMMA_URL}/events/keyset",
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
     events = raw.get("events") or raw.get("data") or []
 
     # 一次收集所有 clobTokenIds，批量拉取实时价格
@@ -77,7 +77,7 @@ def list_trending_events(
             tids = json.loads(m.get("clobTokenIds") or "[]")
             m["_tids"] = tids
             all_token_ids.update(tids)
-    price_map = utils.batch_last_prices(list(all_token_ids)) if all_token_ids else {}
+    price_map = await utils.batch_last_prices_async(list(all_token_ids)) if all_token_ids else {}
 
     _MK_ORDER = (
         "id",

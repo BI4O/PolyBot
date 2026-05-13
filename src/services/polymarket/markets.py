@@ -19,7 +19,7 @@ _ORDER_FIELDS = Literal[
 ]
 
 
-def list_markets(
+async def list_markets(
     limit: int = 20,
     offset: int = 0,
     detail: bool = True,
@@ -76,26 +76,33 @@ def list_markets(
     if include_tag is not None:
         params["include_tag"] = str(include_tag).lower()
 
-    resp = httpx.get(
-        f"{utils._GAMMA_URL}/markets",
-        params=params,
-        headers=utils._HEADERS,
-        timeout=15,
-    )
-    resp.raise_for_status()
-    raw = resp.json()
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._GAMMA_URL}/markets",
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
     if not detail:
-        return utils.enrich_markets(raw, limit)
+        # Pre-fetch prices async-safe, then enrich with external price_map
+        all_token_ids: set[str] = set()
+        for m in raw:
+            import json as _json
+            tids = _json.loads(m.get("clobTokenIds") or "[]")
+            all_token_ids.update(tids)
+        price_map = await utils.batch_last_prices_async(list(all_token_ids)) if all_token_ids else {}
+        return utils.enrich_markets(raw, limit, price_map=price_map)
     return raw
 
 
-def list_trending_markets(
+async def list_trending_markets(
     limit: int = 10,
     tag_slug: str | None = None,
     closed: bool | None = None,
 ) -> list[dict]:
     """按 24h 成交量降序返回热门市场，可指定 tag_slug 限定分类。"""
-    return list_markets(
+    return await list_markets(
         limit=limit,
         detail=False,
         order_by="volume24hr",
@@ -105,34 +112,34 @@ def list_trending_markets(
     )
 
 
-def get_market_by_slug(slug: str) -> dict:
+async def get_market_by_slug(slug: str) -> dict:
     """通过 slug 获取单个市场的完整信息。"""
-    resp = httpx.get(
-        f"{utils._GAMMA_URL}/markets/slug/{slug}",
-        headers=utils._HEADERS,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._GAMMA_URL}/markets/slug/{slug}",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
-def get_market_by_id(market_id: int) -> dict:
+async def get_market_by_id(market_id: int) -> dict:
     """通过数字 ID 获取单个市场的完整信息。"""
-    resp = httpx.get(
-        f"{utils._GAMMA_URL}/markets/{market_id}",
-        headers=utils._HEADERS,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._GAMMA_URL}/markets/{market_id}",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
-def get_market_by_token_addr(token_addr: str) -> dict:
+async def get_market_by_token_addr(token_addr: str) -> dict:
     """通过 token 地址（token ID）获取所属市场信息。"""
-    resp = httpx.get(
-        f"{utils._CLOB_URL}/markets-by-token/{token_addr}",
-        headers=utils._HEADERS,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._CLOB_URL}/markets-by-token/{token_addr}",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()

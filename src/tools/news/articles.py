@@ -53,5 +53,5 @@ async def analyze_market_news(market_slug: str) -> dict:
         Market info, extracted keywords, and matching news articles.
     """
     from src.services.polymarket import get_market_by_slug
-    market = get_market_by_slug(market_slug)
+    market = await get_market_by_slug(market_slug)
     return await _analyze_market(market, since_hours=6)

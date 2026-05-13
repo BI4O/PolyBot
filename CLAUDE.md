@@ -131,3 +131,47 @@ src/services/polymarket/
 ├── events.py       # 首页热门 (list_trending_events)
 └── tags.py         # 标签 (list_tags, get_tag_by_slug, resolve_tag_slug)
 ```
+
+## Async HTTP × LangGraph：BlockingError
+
+LangGraph 把所有 tools（包括 sync tools）都通过 `asyncio.gather` 在事件循环中执行。这时任何**同步阻塞网络调用**都会被 blockbuster 拦截并抛 `BlockingError`：
+
+```
+blockbuster.blockbuster.BlockingError: Blocking call to socket.socket.connect
+```
+
+### 根因
+
+用同步 `httpx.get()` / `requests.get()` 等做 HTTP 请求。在 ASGI/LangGraph 环境下，它们阻塞了事件循环。
+
+### 修复原则：一律 async
+
+**所有** HTTP 调用都必须用 `httpx.AsyncClient`，不能用 `httpx.get()`：
+
+```python
+# ❌ 会触发 BlockingError
+resp = httpx.get(url, headers=headers)
+data = resp.json()
+
+# ✅ 正确
+async with httpx.AsyncClient(headers=headers) as client:
+    resp = await client.get(url)
+    data = resp.json()
+```
+
+关键点：
+- 从工具（`@tool`）到 service 层的**整条调用链**都必须 async，不能 sync → async 混搭
+- 测试 mock 也要跟着改：`patch("httpx.AsyncClient")` 而非 `patch("httpx...get")`
+- `@tool` 装饰后的函数变成 `StructuredTool` 对象，测试时用 `.ainvoke()` 而非直接调用
+
+### 连锁反应：asyncio.run() 在事件循环内失效
+
+`batch_last_prices` 原来用 `asyncio.run(_run())` 封装异步逻辑。当它被 async 函数调用时，`asyncio.run()` 会抛：
+```
+RuntimeError: asyncio.run() cannot be called from a running event loop
+```
+
+修复方案：
+- 提供显式 async 版本 `batch_last_prices_async()`，内部用 `async with httpx.AsyncClient` 而不调用 `asyncio.run()`
+- sync 版保留 `asyncio.run()` 给 sync 调用者，加上 try/except 检测运行中事件循环时给 warning
+- 在 async 调用链中，一律使用 `batch_last_prices_async()`

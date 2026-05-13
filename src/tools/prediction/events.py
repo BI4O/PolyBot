@@ -12,7 +12,7 @@ from src.services.polymarket import (
 
 
 @tool
-def search_events(query: str, limit: int = 5, closed: bool = False) -> list[dict]:
+async def search_events(query: str, limit: int = 5, closed: bool = False) -> list[dict]:
     """Search prediction events by keyword. Returns events containing their markets.
 
     Args:
@@ -24,11 +24,11 @@ def search_events(query: str, limit: int = 5, closed: bool = False) -> list[dict
         Events with title, volume, and nested markets with question, odds, and outcome probabilities.
     """
     service_closed = closed if closed else None
-    return search_events_by_keyword(query, limit=limit, closed=service_closed)
+    return await search_events_by_keyword(query, limit=limit, closed=service_closed)
 
 
 @tool
-def get_trending_events(
+async def get_trending_events(
     limit: int = 5,
     tag: str | None = None,
     closed: bool = False,
@@ -45,11 +45,11 @@ def get_trending_events(
     """
     # API 默认返回未结束市场，只在请求已结束市场时才传 closed=True
     service_closed = closed if closed else None
-    return list_trending_markets(limit=limit, tag_slug=tag, closed=service_closed)
+    return await list_trending_markets(limit=limit, tag_slug=tag, closed=service_closed)
 
 
 @tool
-def get_event_detail(market_slug: str) -> dict:
+async def get_event_detail(market_slug: str) -> dict:
     """Get full details for a specific prediction market.
 
     Args:
@@ -58,4 +58,4 @@ def get_event_detail(market_slug: str) -> dict:
     Returns:
         Full market data including question, outcomes, probabilities, volume, and description.
     """
-    return get_market_by_slug(market_slug)
+    return await get_market_by_slug(market_slug)
