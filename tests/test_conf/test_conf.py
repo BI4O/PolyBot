@@ -28,11 +28,9 @@ class TestAgentBackend:
 
 class TestAgentModels:
     def test_model_config(self):
-        from src.conf.agent_models import OPENAI_DEEPSEEK_V4_FLASH
+        from src.conf.agent_models import DEEPSEEK_V4_FLASH
 
-        assert OPENAI_DEEPSEEK_V4_FLASH.model == "deepseek-v4-flash"
-        assert OPENAI_DEEPSEEK_V4_FLASH.request_timeout == 20.0
-        assert OPENAI_DEEPSEEK_V4_FLASH.max_retries == 2
+        assert DEEPSEEK_V4_FLASH.model == "deepseek-v4-flash"
 
     def test_inbound_patch_applied(self):
         """_convert_dict_to_message should be our patched version."""

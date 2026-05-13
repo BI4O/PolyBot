@@ -1,0 +1,24 @@
+services:
+  langgraph-api:
+    build: .
+    image: polybot:latest
+    ports:
+      - "${LANGGRAPH_PORT:-8123}:${LANGGRAPH_PORT:-8123}"
+    env_file:
+      - .env
+    volumes:
+      - news_data:/app/data
+    restart: unless-stopped
+
+  news-fetcher:
+    build: .
+    image: polybot:latest
+    command: uv run python -m src.run.sub_service_news_fetcher
+    env_file:
+      - .env
+    volumes:
+      - news_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  news_data:

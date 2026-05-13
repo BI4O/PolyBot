@@ -2,13 +2,17 @@
 import os
 import sqlite3
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from src.services.news.db import init_db, get_stats, insert_articles, search_news, close_db
+
+_NOW = datetime.now(timezone.utc)
+_RECENT = _NOW - timedelta(hours=1)
+_OLD = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +45,7 @@ class TestInsertArticles:
             {
                 "guid": "1", "title": "Bitcoin Rally", "link": "https://a.com/1",
                 "summary": "Bitcoin price goes up", "source_name": "A", "source_category": "crypto",
-                "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+                "published": _RECENT,
             },
         ]
         count = insert_articles(articles)
@@ -55,7 +59,7 @@ class TestInsertArticles:
             {
                 "guid": "dup", "title": "Original", "link": "https://a.com/1",
                 "summary": "", "source_name": "A", "source_category": "c",
-                "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+                "published": _RECENT,
             },
         ]
         insert_articles(articles)
@@ -73,12 +77,12 @@ class TestInsertArticles:
         old = {
             "guid": "old", "title": "Old", "link": "", "summary": "",
             "source_name": "A", "source_category": "c",
-            "published": datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+            "published": _OLD,
         }
         fresh = {
             "guid": "new", "title": "Fresh", "link": "", "summary": "",
             "source_name": "B", "source_category": "c",
-            "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+            "published": _RECENT,
         }
         insert_articles([old, fresh])
         stats = get_stats()
@@ -92,7 +96,7 @@ class TestSearchNews:
         return {
             "guid": guid, "title": title, "link": f"https://a.com/{guid}",
             "summary": f"About {title}", "source_name": "T", "source_category": "c",
-            "published": published or datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+            "published": published or _RECENT,
         }
 
     def test_fts_finds_by_keyword(self):
@@ -112,7 +116,7 @@ class TestSearchNews:
         assert search_news([]) == []
 
     def test_time_filter(self):
-        insert_articles([self._make("Old news", "o1", published=datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc))])
+        insert_articles([self._make("Old news", "o1", published=_OLD)])
         results = search_news(["Old"], since_hours=6)
         assert results == []
 
@@ -127,7 +131,7 @@ class TestSearchNews:
             "guid": "s1", "title": "Title only", "link": "https://a.com/s1",
             "summary": "Deep dive into blockchain tech", "source_name": "T",
             "source_category": "c",
-            "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+            "published": _RECENT,
         }])
         results = search_news(["blockchain"], since_hours=24)
         assert len(results) == 1
@@ -156,7 +160,7 @@ class TestInsertArticlesEdgeCases:
             {
                 "guid": "v1", "title": "Valid", "link": "", "summary": "",
                 "source_name": "A", "source_category": "c",
-                "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+                "published": _RECENT,
             },
             {"guid": "i1", "title": "No date", "link": "", "summary": "", "source_name": "A", "source_category": "c"},
             {"guid": "i2", "title": "Also no date", "link": "", "summary": "", "source_name": "B", "source_category": "c"},
@@ -169,7 +173,7 @@ class TestInsertArticlesEdgeCases:
         a = {
             "guid": "", "title": "No GUID", "link": "https://example.com/1",
             "summary": "", "source_name": "A", "source_category": "c",
-            "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+            "published": _RECENT,
         }
         assert insert_articles([a]) == 1
         a["title"] = "Duplicate by link"
@@ -180,7 +184,7 @@ class TestInsertArticlesEdgeCases:
         insert_articles([{
             "guid": "tr1", "title": "NVIDIA Partners with Crypto Mining Firm",
             "link": "", "summary": "", "source_name": "A", "source_category": "c",
-            "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc),
+            "published": _RECENT,
         }])
         assert len(search_news(["NVIDIA"], since_hours=24)) == 1
         assert len(search_news(["Crypto"], since_hours=24)) == 1
@@ -210,7 +214,7 @@ class TestGetStatsEdgeCases:
         """多个源时按条数降序排列。"""
         articles = [
             {"guid": f"s{i}", "title": f"A{i}", "link": "", "summary": "", "source_name": src, "source_category": "c",
-             "published": datetime(2026, 5, 7, 10, 0, 0, tzinfo=timezone.utc)}
+             "published": _RECENT}
             for i, src in enumerate(["B", "A", "B", "A", "A"])
         ]
         insert_articles(articles)

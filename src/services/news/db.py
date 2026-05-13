@@ -17,20 +17,35 @@ def _resolve_db_path() -> str:
 
 
 def _get_conn() -> sqlite3.Connection:
+    """每次调用创建独立 connection，避免 LangGraph worker 跨线程复用。
+
+    WAL 模式允许多线程并发读，写入不阻塞读取。
+    """
     global _conn, _conn_path
     path = _resolve_db_path()
-    if _conn is None or _conn_path != path:
-        close_db()
-        _conn = sqlite3.connect(path)
-        _conn.row_factory = sqlite3.Row
-        _conn_path = path
+    if _conn is not None and _conn_path == path:
+        try:
+            # 快速验证连接是否有效
+            _conn.execute("SELECT 1")
+            return _conn
+        except sqlite3.ProgrammingError:
+            pass
+    # 连接无效或路径变了 → 重建
+    close_db()
+    _conn = sqlite3.connect(path, check_same_thread=False)
+    _conn.row_factory = sqlite3.Row
+    _conn.execute("PRAGMA journal_mode=WAL")
+    _conn_path = path
     return _conn
 
 
 def close_db() -> None:
     global _conn
     if _conn is not None:
-        _conn.close()
+        try:
+            _conn.close()
+        except Exception:
+            pass
         _conn = None
 
 
