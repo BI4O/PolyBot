@@ -175,3 +175,30 @@ RuntimeError: asyncio.run() cannot be called from a running event loop
 - 提供显式 async 版本 `batch_last_prices_async()`，内部用 `async with httpx.AsyncClient` 而不调用 `asyncio.run()`
 - sync 版保留 `asyncio.run()` 给 sync 调用者，加上 try/except 检测运行中事件循环时给 warning
 - 在 async 调用链中，一律使用 `batch_last_prices_async()`
+
+## SSH：云服务器部署
+
+本机通过 Clash Verge (verge-mih) 代理上网，端口 `127.0.0.1:7897`。
+
+### 服务器
+
+```
+Host openclaw
+  HostName 45.77.245.137
+  User bi4o
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+- `ssh openclaw` → `45.77.245.137` — **此服务器**，PolyBot 后端在这里
+- 部署流程：`git pull && docker compose down && docker compose up -d`
+
+### SSH 连接失败排查
+
+**现象：** 用未定义的主机别名（如 `openclaw-prod`）SSH 时连到 `127.0.0.1:7897` 然后断开
+
+**原因：** 主机别名在 SSH config 中不存在 → SSH 尝试 DNS 解析 → Clash 全局代理接管 → 代理不认识 SSH 协议
+
+**解决：**
+1. `cat ~/.ssh/config` 确认别名存在
+2. 用已定义的别名或 IP 直连
+3. 检查 Clash Verge 是否开了全局代理；需 SSH 时可暂时关掉或切规则模式
