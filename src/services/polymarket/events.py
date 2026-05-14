@@ -70,26 +70,6 @@ async def list_trending_events(
         raw = resp.json()
     events = raw.get("events") or raw.get("data") or []
 
-    # 一次收集所有 clobTokenIds，批量拉取实时价格
-    all_token_ids: set[str] = set()
-    for ev in events:
-        for m in ev.get("markets") or []:
-            tids = json.loads(m.get("clobTokenIds") or "[]")
-            m["_tids"] = tids
-            all_token_ids.update(tids)
-    price_map = await utils.batch_last_prices_async(list(all_token_ids)) if all_token_ids else {}
-
-    _MK_ORDER = (
-        "id",
-        "slug",
-        "question",
-        "options",
-        "volume",
-        "startDate",
-        "endDate",
-        "description",
-        "icon",
-    )
     _TAG_FIELDS = ("id", "label", "slug")
 
     result: list[dict] = []
@@ -101,27 +81,7 @@ async def list_trending_events(
         for m in ev.get("markets") or []:
             if utils.is_market_closed(m) != closed:
                 continue
-            item = {}
-            for k in _MK_ORDER:
-                if k == "options":
-                    outcomes = json.loads(m.get("outcomes") or "[]")
-                    prices = json.loads(m.get("outcomePrices") or "[]")
-                    tids = m["_tids"]
-                    opts = []
-                    for i in range(min(len(outcomes), len(prices))):
-                        opt = {"name": outcomes[i], "price": prices[i]}
-                        tid = tids[i] if i < len(tids) else None
-                        if tid and tid in price_map and price_map[tid].get("price"):
-                            lp = price_map[tid]
-                            opt["side"] = lp["side"]
-                            opt["last"] = lp["price"]
-                            p = float(lp["price"])
-                            opt["multiplier"] = round(1 / p, 2) if p > 0 else None
-                            opt["pct"] = round(p * 100, 1)
-                        opts.append(opt)
-                    item[k] = opts
-                elif k in m:
-                    item[k] = m[k]
+            item = {k: m[k] for k in _MK_BROWSE if k in m}
             enriched.append(item)
 
         enriched.sort(key=lambda m: float(m.get("volume", 0) or 0), reverse=True)
@@ -145,25 +105,116 @@ async def list_trending_events(
     return result
 
 
+async def get_event_by_slug(slug: str) -> dict | None:
+    """通过 event slug 获取单个事件的完整信息。
+
+    GET /events?slug={slug} 返回数组，取首项。
+    返回结构与 ``list_trending_events`` 一致（含 nested enriched markets）。
+    查不到返回 None。
+
+    Args:
+        slug: 事件的 URL slug，如 "when-will-bitcoin-hit-150k"。
+
+    Returns:
+        Enriched event dict，或 None（未找到）。
+    """
+    params: dict = {"slug": slug}
+    async with httpx.AsyncClient(headers=utils._HEADERS) as client:
+        resp = await client.get(
+            f"{utils._GAMMA_URL}/events",
+            params=params,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+    if isinstance(raw, list):
+        events = raw
+    else:
+        events = raw.get("events") or raw.get("data") or []
+    if not events:
+        return None
+
+    ev = events[0]
+
+    # 收集 clobTokenIds 拉取实时价格
+    all_token_ids: set[str] = set()
+    for m in ev.get("markets") or []:
+        tids = json.loads(m.get("clobTokenIds") or "[]")
+        m["_tids"] = tids
+        all_token_ids.update(tids)
+    price_map = await utils.batch_last_prices_async(list(all_token_ids)) if all_token_ids else {}
+
+    _MK_ORDER = (
+        "id", "slug", "question", "options", "volume",
+        "startDate", "endDate", "description", "icon",
+    )
+    _TAG_FIELDS = ("id", "label", "slug")
+
+    enriched_markets = []
+    for m in ev.get("markets") or []:
+        item = {}
+        for k in _MK_ORDER:
+            if k == "options":
+                outcomes = json.loads(m.get("outcomes") or "[]")
+                prices = json.loads(m.get("outcomePrices") or "[]")
+                tids = m["_tids"]
+                opts = []
+                for i in range(min(len(outcomes), len(prices))):
+                    opt = {"name": outcomes[i], "price": prices[i]}
+                    tid = tids[i] if i < len(tids) else None
+                    if tid and tid in price_map and price_map[tid].get("price"):
+                        lp = price_map[tid]
+                        opt["side"] = lp["side"]
+                        opt["last"] = lp["price"]
+                        p = float(lp["price"])
+                        opt["multiplier"] = round(1 / p, 2) if p > 0 else None
+                        opt["pct"] = round(p * 100, 1)
+                    opts.append(opt)
+                item[k] = opts
+            elif k in m:
+                item[k] = m[k]
+        enriched_markets.append(item)
+
+    enriched_markets.sort(key=lambda x: float(x.get("volume", 0) or 0), reverse=True)
+
+    return {
+        "id": ev.get("id"),
+        "title": ev.get("title"),
+        "slug": ev.get("slug"),
+        "volume": float(ev.get("volume", 0)),
+        "image": ev.get("image"),
+        "closed": ev.get("closed", False),
+        "tags": [
+            {k: t[k] for k in _TAG_FIELDS if k in t}
+            for t in (ev.get("tags") or [])
+        ],
+        "markets": enriched_markets,
+    }
+
+
 if __name__ == "__main__":
+    import asyncio
     from rich import print as rprint
 
     # uv run -m src.services.polymarket.events
 
-    rprint("=== list_trending_events(limit=5) ===")
-    result = list_trending_events(limit=5)
-    for ev in result:
-        ev_vol = ev["volume"]
-        print(
-            f"\n[Event] {ev['title']}  (volume={ev_vol:,.0f}, total markets={len(ev['markets'])})"
-        )
-        for m in ev["markets"][:5]:
-            mv = float(m.get("volume", 0) or 0)
-            pct = (mv / ev_vol * 100) if ev_vol > 0 else 0
-            outcome = ", ".join(
-                f"{o.get('name', '')}={o.get('pct', '?')}%"
-                for o in m.get("options", [])[:2]
+    async def _main():
+        rprint("=== list_trending_events(limit=5) ===")
+        result = await list_trending_events(limit=5)
+        for ev in result:
+            ev_vol = ev["volume"]
+            print(
+                f"\n[Event] {ev['title']}  (volume={ev_vol:,.0f}, total markets={len(ev['markets'])})"
             )
-            print(f"  [{pct:4.1f}%] {m['question']}  | {outcome}")
-        if len(ev["markets"]) > 5:
-            print(f"  ... 共 {len(ev['markets'])} 个市场")
+            for m in ev["markets"][:5]:
+                mv = float(m.get("volume", 0) or 0)
+                pct = (mv / ev_vol * 100) if ev_vol > 0 else 0
+                outcome = ", ".join(
+                    f"{o.get('name', '')}={o.get('pct', '?')}%"
+                    for o in m.get("options", [])[:2]
+                )
+                print(f"  [{pct:4.1f}%] {m['question']}  | {outcome}")
+            if len(ev["markets"]) > 5:
+                print(f"  ... 共 {len(ev['markets'])} 个市场")
+
+    asyncio.run(_main())

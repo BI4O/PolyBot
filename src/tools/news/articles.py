@@ -5,7 +5,11 @@ Wraps News RSS + SQLite services with langchain tool decorators.
 
 from langchain.tools import tool
 from src.services.news import fetch_all_news, fetch_news_by_category
-from src.services.news.db import search_news as _search_news_db
+from src.services.news.db import (
+    init_db as _init_db,
+    insert_articles as _insert_articles,
+    search_news as _search_news_db,
+)
 from src.services.news.analyzer import analyze_market as _analyze_market
 
 
@@ -36,8 +40,20 @@ async def fetch_latest_news(category: str | None = None, max_per_source: int = 5
         Fresh news articles sorted by publish time (newest first).
     """
     if category:
-        return await fetch_news_by_category(category, max_per_source=max_per_source)
-    return await fetch_all_news(max_per_source=max_per_source)
+        articles = await fetch_news_by_category(category, max_per_source=max_per_source)
+    else:
+        articles = await fetch_all_news(max_per_source=max_per_source)
+
+    # 写入 DB 供后续 search_news 搜索
+    if articles:
+        try:
+            _init_db()
+            _insert_articles(articles)
+        except Exception:
+            # DB 写入不应阻塞返回文章
+            pass
+
+    return articles
 
 
 @tool

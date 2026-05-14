@@ -122,7 +122,12 @@ def search_news(
     if not keywords:
         return []
     conn = _get_conn()
-    query = " OR ".join(keywords)
+    # 对每个关键词做 FTS5 安全转义：包裹双引号防止特殊字符（-、"、AND/OR 等）被解析为语法
+    def _escape_fts5(term: str) -> str:
+        escaped = term.replace('"', '""')
+        return f'"{escaped}"'
+
+    query = " OR ".join(_escape_fts5(k) for k in keywords if k.strip())
     sql = """
         SELECT a.* FROM articles a
         JOIN articles_fts f ON a.rowid = f.rowid
@@ -134,8 +139,8 @@ def search_news(
     try:
         cur = conn.execute(sql, (query, f"-{since_hours} hours", limit))
         return [dict(row) for row in cur.fetchall()]
-    except sqlite3.OperationalError as e:
-        print(f"[news] FTS 搜索语法错误: {e}")
+    except (sqlite3.OperationalError, sqlite3.InterfaceError) as e:
+        print(f"[news] FTS 搜索错误 ({type(e).__name__}): {e}")
         return []
 
 

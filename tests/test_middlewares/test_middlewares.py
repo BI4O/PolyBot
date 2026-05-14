@@ -19,7 +19,7 @@ class TestPolymarketRetry:
         from src.middlewares import POLYMARKET_RETRY
 
         assert set(POLYMARKET_RETRY._tool_filter) == {
-            "search_events", "get_trending_events", "get_event_detail",
+            "search_events", "get_trending_events", "get_event_detail", "get_market_detail",
         }
 
     def test_retry_on_connection_errors(self):

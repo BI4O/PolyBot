@@ -1,7 +1,5 @@
 """Polymarket 关键词搜索服务（返回 Events 级别）。"""
 
-import json
-
 import httpx
 
 from src.services.polymarket import utils
@@ -35,26 +33,7 @@ async def search_events_by_keyword(
         raw = resp.json()
     events = raw.get("events") or []
 
-    # 一次批量拉取所有 token 的实时价格
-    all_token_ids: set[str] = set()
-    for ev in events:
-        for m in ev.get("markets") or []:
-            tids = json.loads(m.get("clobTokenIds") or "[]")
-            m["_tids"] = tids
-            all_token_ids.update(tids)
-    price_map = await utils.batch_last_prices_async(list(all_token_ids)) if all_token_ids else {}
-
-    _MK_ORDER = (
-        "id",
-        "slug",
-        "question",
-        "options",
-        "volume",
-        "startDate",
-        "endDate",
-        "description",
-        "icon",
-    )
+    _MK_BROWSE = ("id", "slug", "question", "volume")
     _TAG_FIELDS = ("id", "label", "slug")
 
     result: list[dict] = []
@@ -66,27 +45,7 @@ async def search_events_by_keyword(
         for m in ev.get("markets") or []:
             if closed is not None and utils.is_market_closed(m) != closed:
                 continue
-            item = {}
-            for k in _MK_ORDER:
-                if k == "options":
-                    outcomes = json.loads(m.get("outcomes") or "[]")
-                    prices = json.loads(m.get("outcomePrices") or "[]")
-                    tids = m["_tids"]
-                    opts = []
-                    for i in range(min(len(outcomes), len(prices))):
-                        opt = {"name": outcomes[i], "price": prices[i]}
-                        tid = tids[i] if i < len(tids) else None
-                        if tid and tid in price_map and price_map[tid].get("price"):
-                            lp = price_map[tid]
-                            opt["side"] = lp["side"]
-                            opt["last"] = lp["price"]
-                            p = float(lp["price"])
-                            opt["multiplier"] = round(1 / p, 2) if p > 0 else None
-                            opt["pct"] = round(p * 100, 1)
-                        opts.append(opt)
-                    item[k] = opts
-                elif k in m:
-                    item[k] = m[k]
+            item = {k: m[k] for k in _MK_BROWSE if k in m}
             enriched.append(item)
 
         enriched.sort(key=lambda x: float(x.get("volume", 0) or 0), reverse=True)
@@ -111,25 +70,29 @@ async def search_events_by_keyword(
 
 
 if __name__ == "__main__":
+    import asyncio
     from rich import print as rprint
 
     # uv run -m src.services.polymarket.search
 
-    for keyword in ("taiwan",):
-        rprint(f"\n=== search_events_by_keyword('{keyword}', limit=2) ===")
-        result = search_events_by_keyword(keyword, limit=10)
-        for ev in result:
-            ev_vol = ev["volume"]
-            print(
-                f"[Event] {ev['title']}  (volume={ev_vol:,.0f}, markets={len(ev['markets'])})"
-            )
-            for m in ev["markets"][:3]:
-                mv = float(m.get("volume", 0) or 0)
-                pct = (mv / ev_vol * 100) if ev_vol > 0 else 0
-                outcomes = ", ".join(
-                    f"{o.get('name', '')}={o.get('pct', '?')}%"
-                    for o in m.get("options", [])[:2]
+    async def _main():
+        for keyword in ("taiwan",):
+            rprint(f"\n=== search_events_by_keyword('{keyword}', limit=2) ===")
+            result = await search_events_by_keyword(keyword, limit=10)
+            for ev in result:
+                ev_vol = ev["volume"]
+                print(
+                    f"[Event] {ev['title']}  (volume={ev_vol:,.0f}, markets={len(ev['markets'])})"
                 )
-                print(f"  [{pct:4.1f}%] {m['question']}  | {outcomes}")
-            if len(ev["markets"]) > 3:
-                print(f"  ... 共 {len(ev['markets'])} 个市场")
+                for m in ev["markets"][:3]:
+                    mv = float(m.get("volume", 0) or 0)
+                    pct = (mv / ev_vol * 100) if ev_vol > 0 else 0
+                    outcomes = ", ".join(
+                        f"{o.get('name', '')}={o.get('pct', '?')}%"
+                        for o in m.get("options", [])[:2]
+                    )
+                    print(f"  [{pct:4.1f}%] {m['question']}  | {outcomes}")
+                if len(ev["markets"]) > 3:
+                    print(f"  ... 共 {len(ev['markets'])} 个市场")
+
+    asyncio.run(_main())

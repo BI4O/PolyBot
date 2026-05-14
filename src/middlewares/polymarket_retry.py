@@ -7,7 +7,7 @@ POLYMARKET_RETRY = ToolRetryMiddleware(
     max_retries=2,
     initial_delay=1.0,
     backoff_factor=3.0,
-    tools=["search_events", "get_trending_events", "get_event_detail"],
+    tools=["search_events", "get_trending_events", "get_event_detail", "get_market_detail"],
     retry_on=(httpx.ConnectError, httpx.TimeoutException, httpx.HTTPStatusError),
 )
 

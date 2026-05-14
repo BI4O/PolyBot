@@ -1,6 +1,7 @@
 """Tests for RSS news service."""
 
 import asyncio
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -305,3 +306,128 @@ class TestFetchNewsByCategory:
         assert len(result) == 2
         assert result[0]["source_category"] == "ai"
         assert result[0]["source_name"] == "SourceB"
+
+
+# ---------------------------------------------------------------------------
+# fetch_all_news — per-source timeout
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAllNewsTimeout:
+    @pytest.mark.asyncio
+    async def test_per_source_timeout_is_6_seconds(self):
+        """每个源的 asyncio.wait_for 超时为 6 秒。"""
+        from src.services.news.client import fetch_all_news as _fn
+        import asyncio
+        import inspect
+        source = inspect.getsource(_fn)
+
+        # 验证 wait_for 调用中的 timeout 参数
+        assert "timeout=6.0" in source, (
+            f"Expected timeout=6.0 in fetch_all_news, got:\n{source}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_per_source_timeout_uses_6s(self):
+        """验证 6s 超时：超过 6s 的源被跳过，正常的源仍返回数据。"""
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+
+        # 第一个源超时（6s），第二个正常
+        async def _side_effect(url, **kw):
+            if "slow" in str(url):
+                await asyncio.sleep(10)  # 超过 6s 会触发 TimeoutError
+                raise AssertionError("should not reach")
+            return _mock_http(text=_RSS_XML)
+
+        mock_client.get.side_effect = _side_effect
+
+        with patch("src.services.news.client.httpx.AsyncClient", return_value=mock_client):
+            result = await fetch_all_news(sources=[
+                {"name": "Slow", "url": "https://slow.com/feed", "category": "crypto"},
+                {"name": "Fast", "url": "https://fast.com/feed", "category": "crypto"},
+            ])
+
+        # 慢源被跳过，快源正常
+        assert len(result) == 2
+        assert result[0]["source_name"] == "Fast"
+
+
+# ---------------------------------------------------------------------------
+# fetch_latest_news tool — auto-save to DB
+# ---------------------------------------------------------------------------
+
+
+class TestFetchLatestNewsTool:
+    """fetch_latest_news 工具抓取后自动写入 DB 的行为。"""
+
+    _ARTICLES = [
+        {"guid": "1", "title": "BTC News", "link": "https://a.com/1",
+         "summary": "Bitcoin summary", "published": datetime(2026, 5, 11, 12, 0, 0, tzinfo=timezone.utc),
+         "source_name": "SourceA", "source_category": "crypto"},
+        {"guid": "2", "title": "ETH News", "link": "https://a.com/2",
+         "summary": "Ethereum summary", "published": datetime(2026, 5, 11, 11, 0, 0, tzinfo=timezone.utc),
+         "source_name": "SourceB", "source_category": "crypto"},
+    ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_saves_to_db(self):
+        """抓取后自动调用 init_db + insert_articles 写入 DB。"""
+        with (
+            patch("src.tools.news.articles.fetch_all_news", return_value=self._ARTICLES),
+            patch("src.tools.news.articles._init_db") as mock_init,
+            patch("src.tools.news.articles._insert_articles") as mock_insert,
+        ):
+            from src.tools.news.articles import fetch_latest_news
+            result = await fetch_latest_news.ainvoke({})
+
+        # 写入 DB
+        mock_init.assert_called_once()
+        mock_insert.assert_called_once_with(self._ARTICLES)
+        # 仍返回文章
+        assert len(result) == 2
+        assert result[0]["title"] == "BTC News"
+
+    @pytest.mark.asyncio
+    async def test_category_still_saves_to_db(self):
+        """按分类抓取也写入 DB。"""
+        with (
+            patch("src.tools.news.articles.fetch_news_by_category", return_value=self._ARTICLES),
+            patch("src.tools.news.articles._init_db") as mock_init,
+            patch("src.tools.news.articles._insert_articles") as mock_insert,
+        ):
+            from src.tools.news.articles import fetch_latest_news
+            result = await fetch_latest_news.ainvoke({"category": "crypto"})
+
+        mock_init.assert_called_once()
+        mock_insert.assert_called_once_with(self._ARTICLES)
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_fetch_does_not_write_db(self):
+        """没有抓到文章时，不调用 insert_articles。"""
+        with (
+            patch("src.tools.news.articles.fetch_all_news", return_value=[]),
+            patch("src.tools.news.articles._init_db") as mock_init,
+            patch("src.tools.news.articles._insert_articles") as mock_insert,
+        ):
+            from src.tools.news.articles import fetch_latest_news
+            result = await fetch_latest_news.ainvoke({})
+
+        mock_init.assert_not_called()
+        mock_insert.assert_not_called()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_db_failure_still_returns_articles(self):
+        """DB 写入失败不应阻塞返回文章。"""
+        with (
+            patch("src.tools.news.articles.fetch_all_news", return_value=self._ARTICLES),
+            patch("src.tools.news.articles._init_db", side_effect=Exception("DB error")),
+            patch("src.tools.news.articles._insert_articles"),
+        ):
+            from src.tools.news.articles import fetch_latest_news
+            result = await fetch_latest_news.ainvoke({})
+
+        # 即使 DB 失败，文章仍然返回
+        assert len(result) == 2

@@ -67,7 +67,7 @@ from src.services.polymarket.markets import (
     list_markets,
     list_trending_markets,
 )
-from src.services.polymarket.events import list_trending_events
+from src.services.polymarket.events import get_event_by_slug, list_trending_events
 from src.services.polymarket.tags import get_tag_by_slug, list_tags
 
 __all__ = [
@@ -80,4 +80,5 @@ __all__ = [
     "get_market_by_slug",
     "get_market_by_id",
     "get_market_by_token_addr",
+    "get_event_by_slug",
 ]

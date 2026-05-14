@@ -135,25 +135,20 @@ def mock_async_client():
 @pytest.mark.asyncio
 class TestSearchEventsByKeywordAsync:
     async def test_returns_events(self):
-        with patch("httpx.AsyncClient") as cls, \
-             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+        with patch("httpx.AsyncClient") as cls:
             cls.return_value.__aenter__.return_value = _async_mock_client(
-                data=_SEARCH_RESPONSE, has_post=True,
+                data=_SEARCH_RESPONSE,
             )
-            prices_async.return_value = {
-                "111": {"token_id": "111", "price": "0.46", "side": "BUY"},
-                "222": {"token_id": "222", "price": "0.54", "side": "SELL"},
-            }
             result = await search_events_by_keyword("bitcoin")
 
         assert len(result) == 1
         assert result[0]["title"] == "When will Bitcoin hit $150k?"
-        assert result[0]["markets"][0]["options"] == [
-            {"name": "Yes", "price": "0.45", "side": "BUY", "last": "0.46",
-             "multiplier": 2.17, "pct": 46.0},
-            {"name": "No", "price": "0.55", "side": "SELL", "last": "0.54",
-             "multiplier": 1.85, "pct": 54.0},
-        ]
+        m = result[0]["markets"][0]
+        assert m["id"] == "573652"
+        assert m["question"] == "Will Bitcoin hit $150k by September 30?"
+        assert m["slug"] == "will-bitcoin-hit-150k-by-september-30"
+        assert m["volume"] == "778900"
+        assert "options" not in m
 
     async def test_empty_response(self):
         with patch("httpx.AsyncClient") as cls:
@@ -171,12 +166,10 @@ class TestSearchEventsByKeywordAsync:
 
     async def test_no_sync_httpx_get_called(self):
         with patch("httpx.AsyncClient") as cls, \
-             patch("src.services.polymarket.search.httpx.get") as sync_get, \
-             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+             patch("src.services.polymarket.search.httpx.get") as sync_get:
             cls.return_value.__aenter__.return_value = _async_mock_client(
-                data=_SEARCH_RESPONSE, has_post=True,
+                data=_SEARCH_RESPONSE,
             )
-            prices_async.return_value = {}
             await search_events_by_keyword("bitcoin")
 
         sync_get.assert_not_called()
@@ -373,12 +366,10 @@ class TestBlockingErrorFix:
 
     async def test_search_uses_async_httpx(self):
         with patch("httpx.AsyncClient") as cls, \
-             patch("src.services.polymarket.search.httpx.get") as sync_get, \
-             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+             patch("src.services.polymarket.search.httpx.get") as sync_get:
             cls.return_value.__aenter__.return_value = _async_mock_client(
-                data=_SEARCH_RESPONSE, has_post=True,
+                data=_SEARCH_RESPONSE,
             )
-            prices_async.return_value = {}
             await search_events_by_keyword("bitcoin")
         sync_get.assert_not_called()
 
@@ -441,24 +432,22 @@ class TestAsyncToolChain:
     Use ``.ainvoke()`` to call them in tests.
     """
 
-    async def test_get_event_detail_tool(self):
-        from src.tools.prediction.events import get_event_detail
+    async def test_get_market_detail_tool(self):
+        from src.tools.prediction.events import get_market_detail
 
         with patch("httpx.AsyncClient") as cls:
             cls.return_value.__aenter__.return_value = _async_mock_client(data=_MARKET_DETAIL)
-            result = await get_event_detail.ainvoke({"market_slug": "bitcoin-108k"})
+            result = await get_market_detail.ainvoke({"market_slug": "bitcoin-108k"})
 
         assert result["slug"] == "bitcoin-108k"
 
     async def test_get_trending_events_tool(self):
         from src.tools.prediction.events import get_trending_events
 
-        with patch("httpx.AsyncClient") as cls, \
-             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+        with patch("httpx.AsyncClient") as cls:
             cls.return_value.__aenter__.return_value = _async_mock_client(
-                data=_MARKETS_LIST, has_post=True,
+                data=_SEARCH_RESPONSE,
             )
-            prices_async.return_value = {}
             result = await get_trending_events.ainvoke(
                 {"limit": 5, "tag": "crypto"},
             )
@@ -468,12 +457,86 @@ class TestAsyncToolChain:
     async def test_search_events_tool(self):
         from src.tools.prediction.events import search_events
 
-        with patch("httpx.AsyncClient") as cls, \
-             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+        with patch("httpx.AsyncClient") as cls:
             cls.return_value.__aenter__.return_value = _async_mock_client(
-                data=_SEARCH_RESPONSE, has_post=True,
+                data=_SEARCH_RESPONSE,
             )
-            prices_async.return_value = {}
             result = await search_events.ainvoke({"query": "bitcoin", "limit": 3})
 
         assert len(result) >= 1
+
+
+@pytest.mark.asyncio
+class TestGetEventBySlugAsync:
+    """Async tests for get_event_by_slug."""
+
+    async def test_returns_enriched_event(self):
+        from src.services.polymarket.events import get_event_by_slug
+
+        with patch("httpx.AsyncClient") as cls, \
+             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+            cls.return_value.__aenter__.return_value = _async_mock_client(
+                data=_SEARCH_RESPONSE,
+            )
+            prices_async.return_value = {
+                "111": {"token_id": "111", "price": "0.46", "side": "BUY"},
+                "222": {"token_id": "222", "price": "0.54", "side": "SELL"},
+            }
+            result = await get_event_by_slug("when-will-bitcoin-hit-150k")
+
+        assert result is not None
+        assert result["id"] == "36173"
+        assert result["title"] == "When will Bitcoin hit $150k?"
+        assert result["slug"] == "when-will-bitcoin-hit-150k"
+        assert len(result["markets"]) == 1
+        m = result["markets"][0]
+        assert m["question"] == "Will Bitcoin hit $150k by September 30?"
+        assert m["options"] == [
+            {"name": "Yes", "price": "0.45", "side": "BUY", "last": "0.46",
+             "multiplier": 2.17, "pct": 46.0},
+            {"name": "No", "price": "0.55", "side": "SELL", "last": "0.54",
+             "multiplier": 1.85, "pct": 54.0},
+        ]
+
+    async def test_not_found_returns_none(self):
+        from src.services.polymarket.events import get_event_by_slug
+
+        with patch("httpx.AsyncClient") as cls:
+            cls.return_value.__aenter__.return_value = _async_mock_client(data={"events": []})
+            result = await get_event_by_slug("nonexistent")
+        assert result is None
+
+    async def test_no_sync_httpx_get(self):
+        from src.services.polymarket.events import get_event_by_slug
+
+        with patch("httpx.AsyncClient") as cls, \
+             patch("src.services.polymarket.events.httpx.get") as sync_get, \
+             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+            cls.return_value.__aenter__.return_value = _async_mock_client(data=_SEARCH_RESPONSE)
+            prices_async.return_value = {}
+            await get_event_by_slug("when-will-bitcoin-hit-150k")
+        sync_get.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestGetEventDetailToolAsync:
+    """Tests for get_event_detail event-level tool."""
+
+    async def test_returns_event(self):
+        from src.tools.prediction.events import get_event_detail
+
+        with patch("httpx.AsyncClient") as cls, \
+             patch("src.services.polymarket.utils.batch_last_prices_async") as prices_async:
+            cls.return_value.__aenter__.return_value = _async_mock_client(
+                data=_SEARCH_RESPONSE,
+            )
+            prices_async.return_value = {
+                "111": {"token_id": "111", "price": "0.46", "side": "BUY"},
+                "222": {"token_id": "222", "price": "0.54", "side": "SELL"},
+            }
+            result = await get_event_detail.ainvoke(
+                {"event_slug": "when-will-bitcoin-hit-150k"},
+            )
+
+        assert result is not None
+        assert result["title"] == "When will Bitcoin hit $150k?"

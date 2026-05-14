@@ -142,11 +142,12 @@ class TestSearchNews:
         assert results == []
 
     def test_fts_query_reserved_words(self):
-        """FTS5 保留字作为关键词不报错（语法错误优雅降级）。"""
+        """FTS5 保留字被双引号包裹后可作为字面关键词搜索。"""
         insert_articles([self._make("OR and AND are words", "rw1")])
-        # "AND" 是 FTS5 运算符，裸查询会触法语法错误，被捕获后返回空
+        # FTS5 转义将 "AND" 包装为 '"AND"'，不再是运算符，而是字面匹配
         results = search_news(["AND"], since_hours=24)
-        assert results == []
+        assert len(results) == 1
+        assert results[0]["guid"] == "rw1"
 
 
 class TestInsertArticlesEdgeCases:

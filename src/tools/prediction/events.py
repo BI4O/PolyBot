@@ -5,10 +5,11 @@ Wraps Polymarket service with langchain tool decorators.
 
 from langchain.tools import tool
 from src.services.polymarket import (
-    get_market_by_slug,
-    list_trending_markets,
+    get_event_by_slug,
+    list_trending_events,
     search_events_by_keyword,
 )
+from src.services.polymarket.markets import get_market_by_slug
 
 
 @tool
@@ -33,23 +34,21 @@ async def get_trending_events(
     tag: str | None = None,
     closed: bool = False,
 ) -> list[dict]:
-    """Get the hottest prediction markets by 24h trading volume.
+    """Get the hottest prediction events by total volume.
 
     Args:
-        limit: Number of markets to return (default 5)
+        limit: Number of events to return (default 5)
         tag: Optional category filter (e.g. "crypto", "politics")
-        closed: Include closed/settled markets (default False, only open markets)
+        closed: Include closed/settled events (default False, only open events)
 
     Returns:
-        Trending markets with question, volume, odds, and outcomes.
+        Events with title, volume, and nested markets with question, odds, and outcome probabilities.
     """
-    # API 默认返回未结束市场，只在请求已结束市场时才传 closed=True
-    service_closed = closed if closed else None
-    return await list_trending_markets(limit=limit, tag_slug=tag, closed=service_closed)
+    return await list_trending_events(limit=limit, tag_slug=tag, closed=closed)
 
 
 @tool
-async def get_event_detail(market_slug: str) -> dict:
+async def get_market_detail(market_slug: str) -> dict:
     """Get full details for a specific prediction market.
 
     Args:
@@ -59,3 +58,17 @@ async def get_event_detail(market_slug: str) -> dict:
         Full market data including question, outcomes, probabilities, volume, and description.
     """
     return await get_market_by_slug(market_slug)
+
+
+@tool
+async def get_event_detail(event_slug: str) -> dict | None:
+    """Get full details for a prediction event, including all its nested markets.
+
+    Args:
+        event_slug: URL slug of the event (e.g. "when-will-bitcoin-hit-150k")
+
+    Returns:
+        Event data with title, volume, nested markets, each with question and odds.
+        Returns None if no event found with that slug.
+    """
+    return await get_event_by_slug(event_slug)

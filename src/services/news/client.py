@@ -140,7 +140,7 @@ async def fetch_all_news(
         async def fetch_one(source: dict[str, Any]) -> list[dict[str, Any]] | None:
             try:
                 items = await asyncio.wait_for(
-                    fetch_feed(source["url"], client), timeout=4.0
+                    fetch_feed(source["url"], client), timeout=6.0
                 )
             except asyncio.TimeoutError:
                 print(f"[news] 超时: {source['name']}")
