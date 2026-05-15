@@ -17,6 +17,7 @@ wheels/
 !.gitignore
 !.gitattributes
 !.python-version
+!.env.example
 
 # test
 .pytest_cache/

@@ -183,14 +183,19 @@ RuntimeError: asyncio.run() cannot be called from a running event loop
 ### 服务器
 
 ```
-Host openclaw
+Host rwa.ltd
   HostName 45.77.245.137
   User bi4o
   IdentityFile ~/.ssh/id_ed25519
 ```
 
-- `ssh openclaw` → `45.77.245.137` — **此服务器**，PolyBot 后端在这里
-- 部署流程：`git pull && docker compose down && docker compose up -d`
+- `ssh rwa.ltd` → `45.77.245.137` — **此服务器**，PolyBot 后端在 `/opt/agents/PolyBot`
+- 部署流程：先传 `.env.docker`，再拉代码重启：
+
+  ```bash
+  scp .env.docker rwa.ltd:/opt/agents/PolyBot/.env.docker
+  ssh rwa.ltd "cd /opt/agents/PolyBot && git pull && docker compose down && docker compose up -d --build"
+  ```
 
 ### SSH 连接失败排查
 
