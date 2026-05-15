@@ -1,7 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "base": "./src/agent/ds_agent.py:agent"
+    "base": "./src/agent/ds_agent.py:agent",
+    "tokenage": "./src/agent/tokenage_agent.py:agent"
   },
   "env": ".env",
   "watch": {
