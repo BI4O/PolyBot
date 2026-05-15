@@ -5,7 +5,7 @@ services:
     ports:
       - "${LANGGRAPH_PORT:-8123}:${LANGGRAPH_PORT:-8123}"
     env_file:
-      - .env
+      - .env.docker
     volumes:
       - news_data:/app/data
     restart: unless-stopped
@@ -15,7 +15,7 @@ services:
     image: polybot:latest
     command: uv run python -m src.run.sub_service_news_fetcher
     env_file:
-      - .env
+      - .env.docker
     volumes:
       - news_data:/app/data
     restart: unless-stopped
